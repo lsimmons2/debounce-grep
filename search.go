@@ -8,14 +8,16 @@ import (
     "os/exec"
     "path/filepath"
     "bufio"
+    "log"
+    "strconv"
 )
 
-type StudyFile struct {
+type FileToSearch struct {
     path string
 }
 
-func (studyFile *StudyFile) hasShebang() bool{
-    for line := range studyFile.fileLinesGenerator(){
+func (FileToSearch *FileToSearch) hasShebang() bool{
+    for line := range FileToSearch.fileLinesGenerator(){
         if line == "*study" {
             return true
         }
@@ -23,10 +25,10 @@ func (studyFile *StudyFile) hasShebang() bool{
     return false
 }
 
-func (studyFile *StudyFile) fileLinesGenerator() <- chan string {
+func (FileToSearch *FileToSearch) fileLinesGenerator() <- chan string {
 	ch := make(chan string)
 	go func() {
-        file, err := os.Open(studyFile.path)
+        file, err := os.Open(FileToSearch.path)
         if err != nil {
             fmt.Printf("type: %T; value: %q\n", err, err)
         }
@@ -40,41 +42,10 @@ func (studyFile *StudyFile) fileLinesGenerator() <- chan string {
 	return ch
 }
 
-func (manager *StudyFileManager) getFileNames() []string{
-    var fileNames []string
-    for i := 0; i < len(manager.studyFiles); i++ {
-        fileNames = append(fileNames, manager.studyFiles[i].path)
-    }
-    return fileNames
-}
-
-func NewStudyFileManager() *StudyFileManager {
-    manager := &StudyFileManager{}
-    dir := "/home/leo/org"
-    err := filepath.Walk(dir, func(path string, info os.FileInfo, _ error) error {
-        if info.IsDir() && info.Name() == "venv" || info.Name() == ".git"  {
-            return filepath.SkipDir
-        }
-        studyFile := StudyFile{path: path}
-        if studyFile.hasShebang() {
-            manager.studyFiles = append(manager.studyFiles, studyFile)
-        }
-        return nil
-    })
-    if err != nil {
-        fmt.Printf("error walking the path %q: %v\n", dir, err)
-    }
-    return manager
-}
-
-type StudyFileManager struct {
-    studyFiles []StudyFile
-}
-
-func (studyFile *StudyFile) getLineNumbersOfSearchTerm(searchTerm string) []int {
+func (FileToSearch *FileToSearch) getLineNumbersOfSearchTerm(searchTerm string) []int {
     var lineNumbers []int
     lineNumber := 1
-    for line := range studyFile.fileLinesGenerator(){
+    for line := range FileToSearch.fileLinesGenerator(){
         if strings.Contains(line, searchTerm) {
             lineNumbers = append(lineNumbers, lineNumber)
         }
@@ -83,13 +54,46 @@ func (studyFile *StudyFile) getLineNumbersOfSearchTerm(searchTerm string) []int 
     return lineNumbers
 }
 
-func (manager *StudyFileManager) getSearchMatchesByLine(searchTerm string) map[string][]int {
-    if len(manager.studyFiles) > 0 {
+
+
+type FileSearcher struct {
+    studyFiles []FileToSearch
+}
+
+func NewFileSearcher() *FileSearcher {
+    fileSearcher := &FileSearcher{}
+    dir := "/home/leo/org"
+    err := filepath.Walk(dir, func(path string, info os.FileInfo, _ error) error {
+        if info.IsDir() && info.Name() == "venv" || info.Name() == ".git"  {
+            return filepath.SkipDir
+        }
+        fileToSearch := FileToSearch{path: path}
+        if fileToSearch.hasShebang() {
+            fileSearcher.studyFiles = append(fileSearcher.studyFiles, fileToSearch)
+        }
+        return nil
+    })
+    if err != nil {
+        fmt.Printf("error walking the path %q: %v\n", dir, err)
+    }
+    return fileSearcher
+}
+
+func (fileSearcher *FileSearcher) getFileNames() []string{
+    var fileNames []string
+    for i := 0; i < len(fileSearcher.studyFiles); i++ {
+        fileNames = append(fileNames, fileSearcher.studyFiles[i].path)
+    }
+    return fileNames
+}
+
+func (fileSearcher *FileSearcher) getSearchMatchesByLine(searchTerm string) map[string][]int {
+    if len(fileSearcher.studyFiles) > 0 {
         searchMatchesByLine := make(map[string][]int)
-        for i := 0; i < len(manager.studyFiles); i++ {
-            lineNumbers := manager.studyFiles[i].getLineNumbersOfSearchTerm(searchTerm)
+        for i := 0; i < len(fileSearcher.studyFiles); i++ {
+            lineNumbers := fileSearcher.studyFiles[i].getLineNumbersOfSearchTerm(searchTerm)
             if len(lineNumbers) > 0 {
-                filePath := manager.studyFiles[i].path
+                filePath := fileSearcher.studyFiles[i].path
                 searchMatchesByLine[filePath] = lineNumbers
             }
         }
@@ -99,139 +103,186 @@ func (manager *StudyFileManager) getSearchMatchesByLine(searchTerm string) map[s
 }
 
 
-func NewStdoutHandler() *StdoutHandler {
-    stdoutHandler := &StdoutHandler{}
-    stdoutHandler.TERMINAL_SPACE_SEARCH_TERM_LINE = 2
-    stdoutHandler.SEARCH_MATCH_TERMINAL_SPACE_START_LINE = 4
-    stdoutHandler.SEARCH_MATCH_TERMINAL_SPACE_END_LINE = 34
-    return stdoutHandler
-}
-
-type StdoutHandler struct {
+type SearchManager struct {
+    fileSearcher FileSearcher
+    DEBOUNCE_TIME_MS int
     TERMINAL_SPACE_SEARCH_TERM_LINE int
     SEARCH_MATCH_TERMINAL_SPACE_START_LINE int
     SEARCH_MATCH_TERMINAL_SPACE_END_LINE int
+    cursorIndex int
+    searchTerm string
 }
 
-
-func (handler *StdoutHandler) displaySearchTermInColor(searchTerm string, colorCode string){
-    handler.clearTerminalLine(handler.TERMINAL_SPACE_SEARCH_TERM_LINE)
-    fmt.Print(colorCode)
-    fmt.Println(searchTerm)
-    fmt.Print("\u001b[0m")
-    handler.placeCursorAtEndOfSearchTerm()
+func NewSearchManager() *SearchManager {
+    searchManager := &SearchManager{}
+    searchManager.DEBOUNCE_TIME_MS = 300
+    searchManager.TERMINAL_SPACE_SEARCH_TERM_LINE = 2
+    searchManager.SEARCH_MATCH_TERMINAL_SPACE_START_LINE = 4
+    searchManager.SEARCH_MATCH_TERMINAL_SPACE_END_LINE = 34
+    searchManager.cursorIndex = 0
+    searchManager.searchTerm = ""
+    return searchManager
 }
 
+func (searchManager *SearchManager) listenToStdinAndSearchFiles() error {
 
-func (handler *StdoutHandler) displaySearchTermBeingTyped(searchTerm string){
-    BLUE_COLOR_CODE := "\u001b[34m"
-    handler.displaySearchTermInColor(searchTerm, BLUE_COLOR_CODE)
-}
+    //beingTyped := ""
+    //lastSearched := ""
 
-
-func (handler *StdoutHandler) displaySearchTermWithMatches(searchTerm string){
-    GREEN_COLOR_CODE := "\u001b[32m"
-    handler.displaySearchTermInColor(searchTerm, GREEN_COLOR_CODE)
-}
-
-
-func (handler *StdoutHandler) displaySearchTermWithoutMatches(searchTerm string){
-    RED_COLOR_CODE := "\u001b[31m"
-    handler.displaySearchTermInColor(searchTerm, RED_COLOR_CODE)
-}
-
-
-func (handler *StdoutHandler) clearTerminalLine(numberOfLineToClear int){
-    fmt.Printf("\033[%d;1H", numberOfLineToClear)
-    fmt.Printf("\033[K")
-}
-
-func (handler *StdoutHandler) clearSearchMatchTerminalSpace(){
-    for i := handler.SEARCH_MATCH_TERMINAL_SPACE_START_LINE; i <= handler.SEARCH_MATCH_TERMINAL_SPACE_END_LINE; i++ {
-        handler.clearTerminalLine(i)
-    }
-    fmt.Printf("\033[%d;1H", handler.SEARCH_MATCH_TERMINAL_SPACE_START_LINE)
-}
-
-func (handler *StdoutHandler) placeCursorAtEndOfSearchTerm(){
-    fmt.Printf("\033[%d;100H", handler.TERMINAL_SPACE_SEARCH_TERM_LINE)
-}
-
-
-func (handler *StdoutHandler) displaySearchMatches(linesByFilePath map[string][]int){
-    handler.clearSearchMatchTerminalSpace()
-    if len(linesByFilePath) > 0 {
-        for filePath, _ := range linesByFilePath {
-            fmt.Println(filePath)
-        }
-    }
-    handler.placeCursorAtEndOfSearchTerm()
-}
-
-
-func (handler *StdoutHandler) handleSearchMatches(beingTyped string, linesByFilePath map[string][]int) error {
-    if len(linesByFilePath) == 0 {
-        handler.displaySearchTermWithoutMatches(beingTyped)
-    } else {
-        handler.displaySearchTermWithMatches(beingTyped)
-    }
-    handler.displaySearchMatches(linesByFilePath)
-    return nil
-}
-
-func listenAndSearchForCLIInput() error {
-
-    studyFileManager := *NewStudyFileManager()
-    stdoutHandler := *NewStdoutHandler()
-    beingTyped := ""
-    lastSearched := ""
-    DEBOUNCE_TIME_MS := 300
-
-    ch := make(chan []byte)
-    go func(ch chan []byte) {
+    stdinChannel := make(chan []byte)
+    go func(stdinChannel chan []byte) {
         for {
             exec.Command("stty", "-F", "/dev/tty", "cbreak", "min", "1").Run()
             exec.Command("stty", "-F", "/dev/tty", "-echo").Run()
             var b []byte = make([]byte, 1)
             os.Stdin.Read(b)
-            ch <- b
+            stdinChannel <- b
         }
-        close(ch)
-    }(ch)
+        close(stdinChannel)
+    }(stdinChannel)
 
     stdinLoop:
     for {
         select {
-            //you have stdin coming in
-            case stdin, ok := <-ch:
+            //stdin coming in
+            case stdin, ok := <-stdinChannel:
                 if !ok {
                     break stdinLoop
                 } else {
-                    //editing beingTyped
-                    if 32 <= stdin[0] && stdin[0] <= 126 {
-                        beingTyped = beingTyped + string(stdin)
-                    } else if stdin[0] == 127 {
-                        if len(beingTyped) > 0 {
-                            beingTyped = beingTyped[:len(beingTyped)-1]
-                        }
-                    }
-                    stdoutHandler.displaySearchTermBeingTyped(beingTyped)
+                    searchManager.editSearchTermWithStdin(stdin)
                 }
             //DEBOUNCE_TIME_MS has passed w/o any stdin
-            case <-time.After(time.Duration((1000000 * DEBOUNCE_TIME_MS)) * time.Nanosecond):
+            case <-time.After(time.Duration((1000000 * searchManager.DEBOUNCE_TIME_MS)) * time.Nanosecond):
                 //searching beingTyped
-                if beingTyped != lastSearched && len(beingTyped) > 0 {
-                    linesByFilePath := studyFileManager.getSearchMatchesByLine(beingTyped)
-                    stdoutHandler.handleSearchMatches(beingTyped, linesByFilePath)
-                    lastSearched = beingTyped
-                }
+                //if beingTyped != lastSearched && len(beingTyped) > 0 {
+                    //linesByFilePath := searchManager.fileSearcher.getSearchMatchesByLine(beingTyped)
+                    //searchManager.handleSearchMatches(beingTyped, linesByFilePath)
+                    //lastSearched = beingTyped
+                //}
         }
     }
     return nil
 }
 
+func (searchManager *SearchManager) positionCursorAtIndex(){
+    fmt.Printf("\033[%d;%dH", searchManager.TERMINAL_SPACE_SEARCH_TERM_LINE, searchManager.cursorIndex+1)
+}
+
+func (searchManager *SearchManager) displaySearchTermInColor(colorCode string){
+    searchManager.clearTerminalLine(searchManager.TERMINAL_SPACE_SEARCH_TERM_LINE)
+    fmt.Print(colorCode)
+    fmt.Print(searchManager.searchTerm)
+    fmt.Print("\u001b[0m")
+    searchManager.positionCursorAtIndex()
+}
+
+func (searchManager *SearchManager) renderSearchTermBeingTyped(){
+    BLUE_COLOR_CODE := "\u001b[34m"
+    searchManager.displaySearchTermInColor(BLUE_COLOR_CODE)
+}
+
+func (searchManager *SearchManager) displayPositiveSearchTerm(){
+    GREEN_COLOR_CODE := "\u001b[32m"
+    searchManager.displaySearchTermInColor(GREEN_COLOR_CODE)
+}
+
+func (searchManager *SearchManager) displayNegativeSearchTerm(){
+    RED_COLOR_CODE := "\u001b[31m"
+    searchManager.displaySearchTermInColor(RED_COLOR_CODE)
+}
+
+func (searchManager *SearchManager) clearTerminalLine(numberOfLineToClear int){
+    fmt.Printf("\033[%d;1H", numberOfLineToClear)
+    fmt.Printf("\033[K")
+}
+
+func (searchManager *SearchManager) clearSearchMatchTerminalSpace(){
+    for i := searchManager.SEARCH_MATCH_TERMINAL_SPACE_START_LINE; i <= searchManager.SEARCH_MATCH_TERMINAL_SPACE_END_LINE; i++ {
+        searchManager.clearTerminalLine(i)
+    }
+    fmt.Printf("\033[%d;1H", searchManager.SEARCH_MATCH_TERMINAL_SPACE_START_LINE)
+}
+
+func (searchManager *SearchManager) displaySearchMatches(linesByFilePath map[string][]int){
+    searchManager.clearSearchMatchTerminalSpace()
+    if len(linesByFilePath) > 0 {
+        for filePath, _ := range linesByFilePath {
+            fmt.Println(filePath)
+        }
+    }
+}
+
+func (searchManager *SearchManager) handleSearchMatches(searchTerm string, linesByFilePath map[string][]int) error {
+    if len(linesByFilePath) == 0 {
+        searchManager.displayNegativeSearchTerm()
+    } else {
+        searchManager.displayPositiveSearchTerm()
+    }
+    return nil
+}
+
+func (searchManager *SearchManager) incrementCursorIndex() {
+    searchManager.cursorIndex += 1
+}
+
+func (searchManager *SearchManager) decrementCursorIndex() {
+    searchManager.cursorIndex -= 1
+}
+
+func (searchManager *SearchManager) deleteCharBackwards() {
+    searchManager.searchTerm = searchManager.searchTerm[0:searchManager.cursorIndex-1] + searchManager.searchTerm[searchManager.cursorIndex:]
+}
+
+func (searchManager *SearchManager) deleteCharForwards() {
+    searchManager.searchTerm = searchManager.searchTerm[0:searchManager.cursorIndex] + searchManager.searchTerm[searchManager.cursorIndex+1:]
+}
+
+func (searchManager *SearchManager) addCharToSearchTerm(char string) {
+    if searchManager.cursorIndex == 0 {
+        searchManager.searchTerm = char + searchManager.searchTerm
+        logToFileCursor(searchManager.cursorIndex)
+    } else if searchManager.cursorIndex == 1 {
+        searchManager.searchTerm = searchManager.searchTerm + char
+    } else {
+        logToFileCursor(searchManager.cursorIndex)
+        searchManager.searchTerm = searchManager.searchTerm[:searchManager.cursorIndex] + char + searchManager.searchTerm[searchManager.cursorIndex:]
+    }
+    searchManager.incrementCursorIndex()
+}
+
+func (searchManager *SearchManager) editSearchTermWithStdin(stdin []byte) {
+    if 32 <= stdin[0] && stdin[0] <= 126 { // char is alphanumeric or punctuation
+        searchManager.addCharToSearchTerm(string(stdin))
+        searchManager.renderSearchTermBeingTyped()
+
+    } else if stdin[0] == 6 { // C-f
+        searchManager.incrementCursorIndex()
+        searchManager.renderSearchTermBeingTyped()
+
+    } else if stdin[0] == 2 { // C-b
+        searchManager.decrementCursorIndex()
+        searchManager.renderSearchTermBeingTyped()
+
+    } else if stdin[0] == 4 { // delete forewards one char
+        searchManager.deleteCharForwards()
+        searchManager.renderSearchTermBeingTyped()
+
+    } else if stdin[0] == 127 { // delete backwards one char
+        searchManager.deleteCharBackwards()
+        searchManager.decrementCursorIndex()
+        searchManager.renderSearchTermBeingTyped()
+        //if len(searchManager.searchTerm) > 0 {
+            ////searchManager.searchTerm = searchManager.searchTerm[:len(searchManager.searchTerm)-1]
+            //searchManager.searchTerm = searchManager.searchTerm[0:searchManager.cursorIndex-2] + searchManager.searchTerm[searchManager.cursorIndex:]
+            //searchManager.decrementCursorIndex()
+        //}
+    }
+    //return searchTerm
+}
+
 func main() {
-    listenAndSearchForCLIInput()
+    searchManager := NewSearchManager()
+    searchManager.listenToStdinAndSearchFiles()
 }
 
 //https://stackoverflow.com/questions/11336048/how-am-i-meant-to-use-filepath-walk-in-go
@@ -239,3 +290,22 @@ func main() {
 //http://ascii-table.com/ansi-escape-sequences.php
 //http://www.lihaoyi.com/post/BuildyourownCommandLinewithANSIescapecodes.html
 //https://github.com/mgutz/ansi
+
+
+func logToFile(message string) {
+    file, err := os.OpenFile("/home/leo/go/src/notes_searcher/log.log", os.O_APPEND|os.O_WRONLY, 0600)
+    if err != nil {
+        log.Fatal("Cannot create file", err)
+    }
+    defer file.Close()
+    fmt.Fprintln(file, message)
+}
+
+func logToFileCursor(index int) {
+    file, err := os.OpenFile("/home/leo/go/src/notes_searcher/log.log", os.O_APPEND|os.O_WRONLY, 0600)
+    if err != nil {
+        log.Fatal("Cannot create file", err)
+    }
+    defer file.Close()
+    fmt.Fprintln(file, strconv.Itoa(index))
+}
