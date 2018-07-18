@@ -111,6 +111,7 @@ type SearchManager struct {
     SEARCH_MATCH_TERMINAL_SPACE_END_LINE int
     cursorIndex int
     searchTerm string
+    searchState string
 }
 
 func NewSearchManager() *SearchManager {
@@ -121,6 +122,7 @@ func NewSearchManager() *SearchManager {
     searchManager.SEARCH_MATCH_TERMINAL_SPACE_END_LINE = 34
     searchManager.cursorIndex = 0
     searchManager.searchTerm = ""
+    searchManager.searchState = "TYPING"
     searchManager.fileSearcher = *NewFileSearcher()
     return searchManager
 }
@@ -164,10 +166,11 @@ func (searchManager *SearchManager) listenToStdinAndSearchFiles() {
 func (searchManager *SearchManager) searchForMatches(){
     linesByFilePath := searchManager.fileSearcher.getSearchMatchesByLine(searchManager.searchTerm)
     if len(linesByFilePath) == 0 {
-        searchManager.displayNegativeSearchTerm()
+        searchManager.searchState = "NEGATIVE"
     } else {
-        searchManager.displayPositiveSearchTerm()
+        searchManager.searchState = "POSITIVE"
     }
+    searchManager.renderSearchTerm()
     searchManager.displaySearchMatches(linesByFilePath)
 }
 
@@ -175,27 +178,25 @@ func (searchManager *SearchManager) positionCursorAtIndex(){
     fmt.Printf("\033[%d;%dH", searchManager.TERMINAL_SPACE_SEARCH_TERM_LINE, searchManager.cursorIndex+1)
 }
 
-func (searchManager *SearchManager) displaySearchTermInColor(colorCode string){
+func (searchManager *SearchManager) renderSearchTerm(){
+    var colorCode string
+    if searchManager.searchState == "TYPING" {
+        colorCode = "\u001b[34m"
+    } else if searchManager.searchState == "POSITIVE" {
+        colorCode = "\u001b[32m"
+    } else if searchManager.searchState == "NEGATIVE" {
+        colorCode = "\u001b[31m"
+    } else {
+        return
+        //THIS SHOULDN'T HAPPEN
+    }
     searchManager.clearTerminalLine(searchManager.TERMINAL_SPACE_SEARCH_TERM_LINE)
+    // no need to navigate to TERMINAL_SPACE_SEARCH_TERM_LINE
+    // since cursor will be there after clearTerminalLine()
     fmt.Print(colorCode)
     fmt.Print(searchManager.searchTerm)
     fmt.Print("\u001b[0m")
     searchManager.positionCursorAtIndex()
-}
-
-func (searchManager *SearchManager) renderSearchTermBeingTyped(){
-    BLUE_COLOR_CODE := "\u001b[34m"
-    searchManager.displaySearchTermInColor(BLUE_COLOR_CODE)
-}
-
-func (searchManager *SearchManager) displayPositiveSearchTerm(){
-    GREEN_COLOR_CODE := "\u001b[32m"
-    searchManager.displaySearchTermInColor(GREEN_COLOR_CODE)
-}
-
-func (searchManager *SearchManager) displayNegativeSearchTerm(){
-    RED_COLOR_CODE := "\u001b[31m"
-    searchManager.displaySearchTermInColor(RED_COLOR_CODE)
 }
 
 func (searchManager *SearchManager) clearTerminalLine(numberOfLineToClear int){
@@ -251,6 +252,16 @@ func (searchManager *SearchManager) editSearchTermWithStdin(stdin []byte) {
 
     if 32 <= stdin[0] && stdin[0] <= 126 { // char is alphanumeric or punctuation
         searchManager.addCharToSearchTerm(string(stdin))
+        searchManager.searchState = "TYPING"
+
+    } else if stdin[0] == 4 { // C-d
+        searchManager.deleteCharForwards()
+        searchManager.searchState = "TYPING"
+
+    } else if stdin[0] == 127 { // backspace
+        searchManager.deleteCharBackwards()
+        searchManager.decrementCursorIndex()
+        searchManager.searchState = "TYPING"
 
     } else if stdin[0] == 6 { // C-f
         searchManager.incrementCursorIndex()
@@ -258,17 +269,10 @@ func (searchManager *SearchManager) editSearchTermWithStdin(stdin []byte) {
     } else if stdin[0] == 2 { // C-b
         searchManager.decrementCursorIndex()
 
-    } else if stdin[0] == 4 { // C-d
-        searchManager.deleteCharForwards()
-
-    } else if stdin[0] == 127 { // backspace
-        searchManager.deleteCharBackwards()
-        searchManager.decrementCursorIndex()
-
     } else {
         return
     }
-    searchManager.renderSearchTermBeingTyped()
+    searchManager.renderSearchTerm()
 }
 
 func main() {
