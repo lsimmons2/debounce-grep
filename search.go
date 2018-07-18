@@ -57,7 +57,7 @@ func (FileToSearch *FileToSearch) getLineNumbersOfSearchTerm(searchTerm string) 
 
 
 type FileSearcher struct {
-    studyFiles []FileToSearch
+    filesToSearch []FileToSearch
 }
 
 func NewFileSearcher() *FileSearcher {
@@ -69,7 +69,7 @@ func NewFileSearcher() *FileSearcher {
         }
         fileToSearch := FileToSearch{path: path}
         if fileToSearch.hasShebang() {
-            fileSearcher.studyFiles = append(fileSearcher.studyFiles, fileToSearch)
+            fileSearcher.filesToSearch = append(fileSearcher.filesToSearch, fileToSearch)
         }
         return nil
     })
@@ -81,19 +81,19 @@ func NewFileSearcher() *FileSearcher {
 
 func (fileSearcher *FileSearcher) getFileNames() []string{
     var fileNames []string
-    for i := 0; i < len(fileSearcher.studyFiles); i++ {
-        fileNames = append(fileNames, fileSearcher.studyFiles[i].path)
+    for i := 0; i < len(fileSearcher.filesToSearch); i++ {
+        fileNames = append(fileNames, fileSearcher.filesToSearch[i].path)
     }
     return fileNames
 }
 
 func (fileSearcher *FileSearcher) getSearchMatchesByLine(searchTerm string) map[string][]int {
-    if len(fileSearcher.studyFiles) > 0 {
+    if len(fileSearcher.filesToSearch) > 0 {
         searchMatchesByLine := make(map[string][]int)
-        for i := 0; i < len(fileSearcher.studyFiles); i++ {
-            lineNumbers := fileSearcher.studyFiles[i].getLineNumbersOfSearchTerm(searchTerm)
+        for i := 0; i < len(fileSearcher.filesToSearch); i++ {
+            lineNumbers := fileSearcher.filesToSearch[i].getLineNumbersOfSearchTerm(searchTerm)
             if len(lineNumbers) > 0 {
-                filePath := fileSearcher.studyFiles[i].path
+                filePath := fileSearcher.filesToSearch[i].path
                 searchMatchesByLine[filePath] = lineNumbers
             }
         }
@@ -121,15 +121,15 @@ func NewSearchManager() *SearchManager {
     searchManager.SEARCH_MATCH_TERMINAL_SPACE_END_LINE = 34
     searchManager.cursorIndex = 0
     searchManager.searchTerm = ""
+    searchManager.fileSearcher = *NewFileSearcher()
     return searchManager
 }
 
-func (searchManager *SearchManager) listenToStdinAndSearchFiles() error {
+func (searchManager *SearchManager) listenToStdinAndSearchFiles() {
 
-    //beingTyped := ""
-    //lastSearched := ""
-
+    lastSearched := ""
     stdinChannel := make(chan []byte)
+
     go func(stdinChannel chan []byte) {
         for {
             exec.Command("stty", "-F", "/dev/tty", "cbreak", "min", "1").Run()
@@ -153,15 +153,22 @@ func (searchManager *SearchManager) listenToStdinAndSearchFiles() error {
                 }
             //DEBOUNCE_TIME_MS has passed w/o any stdin
             case <-time.After(time.Duration((1000000 * searchManager.DEBOUNCE_TIME_MS)) * time.Nanosecond):
-                //searching beingTyped
-                //if beingTyped != lastSearched && len(beingTyped) > 0 {
-                    //linesByFilePath := searchManager.fileSearcher.getSearchMatchesByLine(beingTyped)
-                    //searchManager.handleSearchMatches(beingTyped, linesByFilePath)
-                    //lastSearched = beingTyped
-                //}
+                if lastSearched != searchManager.searchTerm {
+                    searchManager.searchForMatches()
+                }
+                lastSearched = searchManager.searchTerm
         }
     }
-    return nil
+}
+
+func (searchManager *SearchManager) searchForMatches(){
+    linesByFilePath := searchManager.fileSearcher.getSearchMatchesByLine(searchManager.searchTerm)
+    if len(linesByFilePath) == 0 {
+        searchManager.displayNegativeSearchTerm()
+    } else {
+        searchManager.displayPositiveSearchTerm()
+    }
+    searchManager.displaySearchMatches(linesByFilePath)
 }
 
 func (searchManager *SearchManager) positionCursorAtIndex(){
@@ -210,15 +217,7 @@ func (searchManager *SearchManager) displaySearchMatches(linesByFilePath map[str
             fmt.Println(filePath)
         }
     }
-}
-
-func (searchManager *SearchManager) handleSearchMatches(searchTerm string, linesByFilePath map[string][]int) error {
-    if len(linesByFilePath) == 0 {
-        searchManager.displayNegativeSearchTerm()
-    } else {
-        searchManager.displayPositiveSearchTerm()
-    }
-    return nil
+    searchManager.positionCursorAtIndex()
 }
 
 func (searchManager *SearchManager) incrementCursorIndex() {
@@ -240,44 +239,36 @@ func (searchManager *SearchManager) deleteCharForwards() {
 func (searchManager *SearchManager) addCharToSearchTerm(char string) {
     if searchManager.cursorIndex == 0 {
         searchManager.searchTerm = char + searchManager.searchTerm
-        logToFileCursor(searchManager.cursorIndex)
     } else if searchManager.cursorIndex == 1 {
         searchManager.searchTerm = searchManager.searchTerm + char
     } else {
-        logToFileCursor(searchManager.cursorIndex)
         searchManager.searchTerm = searchManager.searchTerm[:searchManager.cursorIndex] + char + searchManager.searchTerm[searchManager.cursorIndex:]
     }
     searchManager.incrementCursorIndex()
 }
 
 func (searchManager *SearchManager) editSearchTermWithStdin(stdin []byte) {
+
     if 32 <= stdin[0] && stdin[0] <= 126 { // char is alphanumeric or punctuation
         searchManager.addCharToSearchTerm(string(stdin))
-        searchManager.renderSearchTermBeingTyped()
 
     } else if stdin[0] == 6 { // C-f
         searchManager.incrementCursorIndex()
-        searchManager.renderSearchTermBeingTyped()
 
     } else if stdin[0] == 2 { // C-b
         searchManager.decrementCursorIndex()
-        searchManager.renderSearchTermBeingTyped()
 
-    } else if stdin[0] == 4 { // delete forewards one char
+    } else if stdin[0] == 4 { // C-d
         searchManager.deleteCharForwards()
-        searchManager.renderSearchTermBeingTyped()
 
-    } else if stdin[0] == 127 { // delete backwards one char
+    } else if stdin[0] == 127 { // backspace
         searchManager.deleteCharBackwards()
         searchManager.decrementCursorIndex()
-        searchManager.renderSearchTermBeingTyped()
-        //if len(searchManager.searchTerm) > 0 {
-            ////searchManager.searchTerm = searchManager.searchTerm[:len(searchManager.searchTerm)-1]
-            //searchManager.searchTerm = searchManager.searchTerm[0:searchManager.cursorIndex-2] + searchManager.searchTerm[searchManager.cursorIndex:]
-            //searchManager.decrementCursorIndex()
-        //}
+
+    } else {
+        return
     }
-    //return searchTerm
+    searchManager.renderSearchTermBeingTyped()
 }
 
 func main() {
