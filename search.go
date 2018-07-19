@@ -20,9 +20,8 @@ func getTtyWidth() int {
     cmd := exec.Command("tput", "cols")
     cmd.Stdin = os.Stdin
     out, _ := cmd.Output()
-    cols, _ := strconv.Atoi(string(out)[:2])
-    logToFileCursor(cols)
-    return cols
+    columnCount, _ := strconv.Atoi(string(out)[:2])
+    return columnCount - 1 // not sure why this is off by one
 }
 
 var (
@@ -36,6 +35,7 @@ const (
     BLUE_COLOR_CODE = "\u001b[34m"
     YELLOW_COLOR_CODE = "\u001b[33m"
     CANCEL_COLOR_CODE = "\u001b[0m"
+    SPACE = " "
 )
 
 type File struct {
@@ -88,12 +88,13 @@ func NewLineWithMatches(lineNo int, matchIndeces [][]int, lineText string) *Line
 
 func (lineWithMatches *LineWithMatches) renderLineNo() {
     fmt.Print(lineWithMatches.lineNo)
-    fmt.Print(" ")
+    fmt.Print(SPACE)
 }
 
-func (lineWithMatches *LineWithMatches) renderLine() {
+func (lineWithMatches *LineWithMatches) renderMatchedLine() {
     lineWithMatches.renderIndent()
     lineWithMatches.renderLineNo()
+    var lineToRender string
     for charIndex, char := range lineWithMatches.text {
         nextMatchStartIndex := -1
         nextMatchEndIndex := -1
@@ -103,33 +104,47 @@ func (lineWithMatches *LineWithMatches) renderLine() {
             nextMatchEndIndex = nextMatchIndexPair[1]
         }
         if charIndex == nextMatchStartIndex {
-            fmt.Print(YELLOW_COLOR_CODE)
+            lineToRender = lineToRender + string(YELLOW_COLOR_CODE)
         }
-        fmt.Print(string(char))
+        lineToRender = lineToRender + string(char)
         if charIndex == nextMatchEndIndex - 1 {
-            fmt.Print(CANCEL_COLOR_CODE)
+            lineToRender = lineToRender + string(CANCEL_COLOR_CODE)
+            //pop match index pair
             lineWithMatches.matchIndeces = append(lineWithMatches.matchIndeces[:0], lineWithMatches.matchIndeces[1:]...)
         }
-        if lineWithMatches.isAtLastTtyColumn(charIndex) {
+    }
+    words := strings.Split(lineToRender, SPACE)
+    var currentLineLength int
+    for _, word := range words {
+        logToFileCursor(currentLineLength)
+        if lineWithMatches.wordWilllHitEndOfTty(word, currentLineLength) {
             fmt.Println("")
             lineWithMatches.renderIndent()
-            lineWithMatches.renderIndent()
+            lineWithMatches.renderLineNoBufferSpace()
+            currentLineLength = (len(word) + len(SPACE))
+        } else {
+            currentLineLength += (len(word) + len(SPACE))
         }
+        fmt.Print(word)
+        fmt.Print(SPACE)
     }
     fmt.Println("")
 }
 
-func (lineWithMatches *LineWithMatches) isAtLastTtyColumn(charIndex int) bool {
-    if charIndex == 0 {
-        return false
-    }
-    endOfTtyIndex := ttyWidth - 2 - lineWithMatches.INDENT_LENGTH - lineWithMatches.LINE_NO_BUFFER_LENGTH
-    return charIndex % endOfTtyIndex == 0
+func (lineWithMatches *LineWithMatches) wordWilllHitEndOfTty(word string, currentLineLength int) bool {
+    ttyLength := ttyWidth - 1 - lineWithMatches.INDENT_LENGTH - lineWithMatches.LINE_NO_BUFFER_LENGTH
+    return (len(word) + currentLineLength) > ttyLength
 }
 
 func (lineWithMatches *LineWithMatches) renderIndent() {
     for i := 1; i <= lineWithMatches.INDENT_LENGTH; i++ { 
-        fmt.Print(" ")
+        fmt.Print(SPACE)
+    }
+}
+
+func (lineWithMatches *LineWithMatches) renderLineNoBufferSpace() {
+    for i := 1; i <= lineWithMatches.LINE_NO_BUFFER_LENGTH; i++ { 
+        fmt.Print(SPACE)
     }
 }
 
@@ -237,7 +252,7 @@ func (fileWithMatches *FileWithMatches) showHits() {
         return fileWithMatches.linesWithMatches[i].lineNo < fileWithMatches.linesWithMatches[j].lineNo
     })
     for _, lineWithMatches := range fileWithMatches.linesWithMatches {
-        lineWithMatches.renderLine()
+        lineWithMatches.renderMatchedLine()
     }
 }
 
@@ -442,13 +457,9 @@ func (searchManager *SearchManager) handleStdinCommands(stdin []byte) {
             searchManager.displaySearchMatches()
         }
 
-    //} else if stdin[0] == 10 { // enter but also C-j
     } else if stdin[0] == 0 { // C-space
         searchManager.toggleSelectedMatchShouldShowHits()
         searchManager.displaySearchMatches()
-
-    //} else if stdin[0] == 5 { // C-e
-    //} else if stdin[0] == 1 { // C-a
 
     } else {
         return
@@ -468,7 +479,7 @@ func logToFile(message string) {
         log.Fatal("Cannot create file", err)
     }
     defer file.Close()
-    fmt.Fprintln(file, message)
+    fmt.Fprint(file, message)
 }
 
 func logToFileCursor(index int) {
@@ -478,5 +489,14 @@ func logToFileCursor(index int) {
     }
     defer file.Close()
     fmt.Fprintln(file, strconv.Itoa(index))
+}
+
+func logToFileInt(index int) {
+    file, err := os.OpenFile("/home/leo/go/src/notes_searcher/log.log", os.O_APPEND|os.O_WRONLY, 0600)
+    if err != nil {
+        log.Fatal("Cannot create file", err)
+    }
+    defer file.Close()
+    fmt.Fprint(file, strconv.Itoa(index))
 }
 
