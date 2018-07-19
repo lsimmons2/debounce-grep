@@ -10,14 +10,40 @@ import (
     "bufio"
     "log"
     "strconv"
+    "sort"
+    "index/suffixarray"
+    "regexp"
 )
 
-type FileToSearch struct {
+
+func getTtyWidth() int {
+    cmd := exec.Command("tput", "cols")
+    cmd.Stdin = os.Stdin
+    out, _ := cmd.Output()
+    cols, _ := strconv.Atoi(string(out)[:2])
+    logToFileCursor(cols)
+    return cols
+}
+
+var (
+    ttyWidth = getTtyWidth()
+)
+
+const (
+    MAGENTA_COLOR_CODE = "\u001b[35m"
+    RED_COLOR_CODE = "\u001b[31m"
+    GREEN_COLOR_CODE = "\u001b[32m"
+    BLUE_COLOR_CODE = "\u001b[34m"
+    YELLOW_COLOR_CODE = "\u001b[33m"
+    CANCEL_COLOR_CODE = "\u001b[0m"
+)
+
+type File struct {
     path string
 }
 
-func (FileToSearch *FileToSearch) hasShebang() bool{
-    for line := range FileToSearch.fileLinesGenerator(){
+func (file *File) hasShebang() bool{
+    for line := range file.fileLinesGenerator(){
         if line == "*study" {
             return true
         }
@@ -25,10 +51,10 @@ func (FileToSearch *FileToSearch) hasShebang() bool{
     return false
 }
 
-func (FileToSearch *FileToSearch) fileLinesGenerator() <- chan string {
+func (file *File) fileLinesGenerator() <- chan string {
 	ch := make(chan string)
 	go func() {
-        file, err := os.Open(FileToSearch.path)
+        file, err := os.Open(file.path)
         if err != nil {
             fmt.Printf("type: %T; value: %q\n", err, err)
         }
@@ -42,22 +68,91 @@ func (FileToSearch *FileToSearch) fileLinesGenerator() <- chan string {
 	return ch
 }
 
-func (FileToSearch *FileToSearch) getLineNumbersOfSearchTerm(searchTerm string) []int {
-    var lineNumbers []int
+type LineWithMatches struct {
+    lineNo int
+    matchIndeces [][]int
+    text string
+    INDENT_LENGTH int
+    LINE_NO_BUFFER_LENGTH int
+}
+
+func NewLineWithMatches(lineNo int, matchIndeces [][]int, lineText string) *LineWithMatches {
+    lineWithMatches := &LineWithMatches{}
+    lineWithMatches.lineNo = lineNo
+    lineWithMatches.matchIndeces = matchIndeces
+    lineWithMatches.text = lineText
+    lineWithMatches.INDENT_LENGTH = 3
+    lineWithMatches.LINE_NO_BUFFER_LENGTH = 3
+    return lineWithMatches
+}
+
+func (lineWithMatches *LineWithMatches) renderLineNo() {
+    fmt.Print(lineWithMatches.lineNo)
+    fmt.Print(" ")
+}
+
+func (lineWithMatches *LineWithMatches) renderLine() {
+    lineWithMatches.renderIndent()
+    lineWithMatches.renderLineNo()
+    for charIndex, char := range lineWithMatches.text {
+        nextMatchStartIndex := -1
+        nextMatchEndIndex := -1
+        if len(lineWithMatches.matchIndeces) > 0 {
+            nextMatchIndexPair := lineWithMatches.matchIndeces[0]
+            nextMatchStartIndex = nextMatchIndexPair[0]
+            nextMatchEndIndex = nextMatchIndexPair[1]
+        }
+        if charIndex == nextMatchStartIndex {
+            fmt.Print(YELLOW_COLOR_CODE)
+        }
+        fmt.Print(string(char))
+        if charIndex == nextMatchEndIndex - 1 {
+            fmt.Print(CANCEL_COLOR_CODE)
+            lineWithMatches.matchIndeces = append(lineWithMatches.matchIndeces[:0], lineWithMatches.matchIndeces[1:]...)
+        }
+        if lineWithMatches.isAtLastTtyColumn(charIndex) {
+            fmt.Println("")
+            lineWithMatches.renderIndent()
+            lineWithMatches.renderIndent()
+        }
+    }
+    fmt.Println("")
+}
+
+func (lineWithMatches *LineWithMatches) isAtLastTtyColumn(charIndex int) bool {
+    if charIndex == 0 {
+        return false
+    }
+    endOfTtyIndex := ttyWidth - 2 - lineWithMatches.INDENT_LENGTH - lineWithMatches.LINE_NO_BUFFER_LENGTH
+    return charIndex % endOfTtyIndex == 0
+}
+
+func (lineWithMatches *LineWithMatches) renderIndent() {
+    for i := 1; i <= lineWithMatches.INDENT_LENGTH; i++ { 
+        fmt.Print(" ")
+    }
+}
+
+func (file *File) getLinesWithMatches(searchTerm string) []LineWithMatches {
+    var linesWithMatches []LineWithMatches
     lineNumber := 1
-    for line := range FileToSearch.fileLinesGenerator(){
+    for line := range file.fileLinesGenerator(){
         if strings.Contains(line, searchTerm) {
-            lineNumbers = append(lineNumbers, lineNumber)
+            searchTermRegex := regexp.MustCompile(searchTerm)
+            index := suffixarray.New([]byte(line))
+            matchIndeces := index.FindAllIndex(searchTermRegex, -1)
+            lineWithMatches := *NewLineWithMatches(lineNumber, matchIndeces, line)
+            linesWithMatches = append(linesWithMatches, lineWithMatches)
         }
         lineNumber ++
     }
-    return lineNumbers
+    return linesWithMatches
 }
 
 
 
 type FileSearcher struct {
-    filesToSearch []FileToSearch
+    filesToSearch []File
 }
 
 func NewFileSearcher() *FileSearcher {
@@ -67,9 +162,9 @@ func NewFileSearcher() *FileSearcher {
         if info.IsDir() && info.Name() == "venv" || info.Name() == ".git"  {
             return filepath.SkipDir
         }
-        fileToSearch := FileToSearch{path: path}
-        if fileToSearch.hasShebang() {
-            fileSearcher.filesToSearch = append(fileSearcher.filesToSearch, fileToSearch)
+        file := File{path: path}
+        if file.hasShebang() {
+            fileSearcher.filesToSearch = append(fileSearcher.filesToSearch, file)
         }
         return nil
     })
@@ -87,21 +182,64 @@ func (fileSearcher *FileSearcher) getFileNames() []string{
     return fileNames
 }
 
-func (fileSearcher *FileSearcher) getSearchMatchesByLine(searchTerm string) map[string][]int {
+func (fileSearcher *FileSearcher) getFilesWithMatches(searchTerm string) []FileWithMatches {
     if len(fileSearcher.filesToSearch) > 0  && len(searchTerm) > 0 {
-        searchMatchesByLine := make(map[string][]int)
+        var filesWithMatches []FileWithMatches
         for i := 0; i < len(fileSearcher.filesToSearch); i++ {
-            lineNumbers := fileSearcher.filesToSearch[i].getLineNumbersOfSearchTerm(searchTerm)
-            if len(lineNumbers) > 0 {
+            var fileWithMatches FileWithMatches
+            linesWithMatches := fileSearcher.filesToSearch[i].getLinesWithMatches(searchTerm)
+            if len(linesWithMatches) > 0 {
                 filePath := fileSearcher.filesToSearch[i].path
-                searchMatchesByLine[filePath] = lineNumbers
+                fileWithMatches = *NewFileWithMatches(filePath, linesWithMatches)
+                filesWithMatches = append(filesWithMatches, fileWithMatches)
             }
         }
-        return searchMatchesByLine
+        return filesWithMatches
     }
     return nil
 }
 
+type FileWithMatches struct {
+    filePath string
+    linesWithMatches []LineWithMatches
+    isSelected bool
+    shouldShowHits bool
+}
+
+func NewFileWithMatches(filePath string, linesWithMatches []LineWithMatches) *FileWithMatches {
+    fileWithMatches := &FileWithMatches{}
+    fileWithMatches.filePath = filePath
+    fileWithMatches.linesWithMatches = linesWithMatches
+    fileWithMatches.isSelected = false
+    fileWithMatches.shouldShowHits = false
+    return fileWithMatches
+}
+
+func (fileWithMatches *FileWithMatches) render() {
+    fileWithMatches.renderFilePath()
+    if fileWithMatches.shouldShowHits {
+        fileWithMatches.showHits()
+    }
+}
+
+func (fileWithMatches *FileWithMatches) renderFilePath() {
+    if fileWithMatches.isSelected {
+        fmt.Print(MAGENTA_COLOR_CODE)
+    }
+    fmt.Println(fileWithMatches.filePath)
+    if fileWithMatches.isSelected {
+        fmt.Print(CANCEL_COLOR_CODE)
+    }
+}
+
+func (fileWithMatches *FileWithMatches) showHits() {
+    sort.Slice(fileWithMatches.linesWithMatches, func(i, j int) bool {
+        return fileWithMatches.linesWithMatches[i].lineNo < fileWithMatches.linesWithMatches[j].lineNo
+    })
+    for _, lineWithMatches := range fileWithMatches.linesWithMatches {
+        lineWithMatches.renderLine()
+    }
+}
 
 type SearchManager struct {
     fileSearcher FileSearcher
@@ -112,6 +250,8 @@ type SearchManager struct {
     cursorIndex int
     searchTerm string
     searchState string
+    selectedMatchIndex int
+    filesWithMatches []FileWithMatches
 }
 
 func NewSearchManager() *SearchManager {
@@ -121,6 +261,7 @@ func NewSearchManager() *SearchManager {
     searchManager.SEARCH_MATCH_TERMINAL_SPACE_START_LINE = 4
     searchManager.SEARCH_MATCH_TERMINAL_SPACE_END_LINE = 34
     searchManager.cursorIndex = 0
+    searchManager.selectedMatchIndex = 0
     searchManager.searchTerm = ""
     searchManager.searchState = "TYPING"
     searchManager.fileSearcher = *NewFileSearcher()
@@ -151,7 +292,7 @@ func (searchManager *SearchManager) listenToStdinAndSearchFiles() {
                 if !ok {
                     break stdinLoop
                 } else {
-                    searchManager.editSearchTermWithStdin(stdin)
+                    searchManager.handleStdinCommands(stdin)
                 }
             //DEBOUNCE_TIME_MS has passed w/o any stdin
             case <-time.After(time.Duration((1000000 * searchManager.DEBOUNCE_TIME_MS)) * time.Nanosecond):
@@ -164,14 +305,16 @@ func (searchManager *SearchManager) listenToStdinAndSearchFiles() {
 }
 
 func (searchManager *SearchManager) searchForMatches(){
-    linesByFilePath := searchManager.fileSearcher.getSearchMatchesByLine(searchManager.searchTerm)
-    if len(linesByFilePath) == 0 {
+    searchManager.filesWithMatches = searchManager.fileSearcher.getFilesWithMatches(searchManager.searchTerm)
+    if len(searchManager.filesWithMatches) == 0 {
         searchManager.searchState = "NEGATIVE"
+        searchManager.selectedMatchIndex = 0
     } else {
         searchManager.searchState = "POSITIVE"
+        searchManager.selectedMatchIndex = 0
     }
     searchManager.renderSearchTerm()
-    searchManager.displaySearchMatches(linesByFilePath)
+    searchManager.displaySearchMatches()
 }
 
 func (searchManager *SearchManager) positionCursorAtIndex(){
@@ -181,11 +324,11 @@ func (searchManager *SearchManager) positionCursorAtIndex(){
 func (searchManager *SearchManager) renderSearchTerm(){
     var colorCode string
     if searchManager.searchState == "TYPING" {
-        colorCode = "\u001b[34m"
+        colorCode = BLUE_COLOR_CODE
     } else if searchManager.searchState == "POSITIVE" {
-        colorCode = "\u001b[32m"
+        colorCode = GREEN_COLOR_CODE
     } else if searchManager.searchState == "NEGATIVE" {
-        colorCode = "\u001b[31m"
+        colorCode = RED_COLOR_CODE
     } else {
         return //THIS SHOULDN'T HAPPEN
     }
@@ -194,7 +337,7 @@ func (searchManager *SearchManager) renderSearchTerm(){
     // since cursor will be there after clearTerminalLine()
     fmt.Print(colorCode)
     fmt.Print(searchManager.searchTerm)
-    fmt.Print("\u001b[0m")
+    fmt.Print(CANCEL_COLOR_CODE)
     searchManager.positionCursorAtIndex()
 }
 
@@ -210,11 +353,16 @@ func (searchManager *SearchManager) clearSearchMatchTerminalSpace(){
     fmt.Printf("\033[%d;1H", searchManager.SEARCH_MATCH_TERMINAL_SPACE_START_LINE)
 }
 
-func (searchManager *SearchManager) displaySearchMatches(linesByFilePath map[string][]int){
+func (searchManager *SearchManager) displaySearchMatches(){
     searchManager.clearSearchMatchTerminalSpace()
-    if len(linesByFilePath) > 0 {
-        for filePath, _ := range linesByFilePath {
-            fmt.Println(filePath)
+    if len(searchManager.filesWithMatches) > 0 {
+        for index, fileWithMatches := range searchManager.filesWithMatches {
+            if index == searchManager.selectedMatchIndex {
+                fileWithMatches.isSelected = true
+            } else {
+                fileWithMatches.isSelected = false
+            }
+            fileWithMatches.render()
         }
     }
     searchManager.positionCursorAtIndex()
@@ -241,7 +389,19 @@ func (searchManager *SearchManager) addCharToSearchTerm(char string) {
     searchManager.incrementCursorIndex()
 }
 
-func (searchManager *SearchManager) editSearchTermWithStdin(stdin []byte) {
+func (searchManager *SearchManager) incrementSelectedMatchIndex() {
+    searchManager.selectedMatchIndex += 1
+}
+
+func (searchManager *SearchManager) decrementSelectedMatchIndex() {
+    searchManager.selectedMatchIndex -= 1
+}
+
+func (searchManager *SearchManager) toggleSelectedMatchShouldShowHits() {
+    searchManager.filesWithMatches[searchManager.selectedMatchIndex].shouldShowHits = !searchManager.filesWithMatches[searchManager.selectedMatchIndex].shouldShowHits
+}
+
+func (searchManager *SearchManager) handleStdinCommands(stdin []byte) {
 
     if 32 <= stdin[0] && stdin[0] <= 126 { // char is alphanumeric or punctuation
         searchManager.addCharToSearchTerm(string(stdin))
@@ -270,6 +430,26 @@ func (searchManager *SearchManager) editSearchTermWithStdin(stdin []byte) {
             searchManager.decrementCursorIndex()
         }
 
+    } else if stdin[0] == 10 { // C-j
+        if searchManager.selectedMatchIndex < len(searchManager.filesWithMatches) - 1 {
+            searchManager.incrementSelectedMatchIndex()
+            searchManager.displaySearchMatches()
+        }
+
+    } else if stdin[0] == 11 { // C-k
+        if searchManager.selectedMatchIndex > 0 {
+            searchManager.decrementSelectedMatchIndex()
+            searchManager.displaySearchMatches()
+        }
+
+    //} else if stdin[0] == 10 { // enter but also C-j
+    } else if stdin[0] == 0 { // C-space
+        searchManager.toggleSelectedMatchShouldShowHits()
+        searchManager.displaySearchMatches()
+
+    //} else if stdin[0] == 5 { // C-e
+    //} else if stdin[0] == 1 { // C-a
+
     } else {
         return
     }
@@ -280,12 +460,6 @@ func main() {
     searchManager := NewSearchManager()
     searchManager.listenToStdinAndSearchFiles()
 }
-
-//https://stackoverflow.com/questions/11336048/how-am-i-meant-to-use-filepath-walk-in-go
-//http://spf13.com/post/is-go-object-oriented/
-//http://ascii-table.com/ansi-escape-sequences.php
-//http://www.lihaoyi.com/post/BuildyourownCommandLinewithANSIescapecodes.html
-//https://github.com/mgutz/ansi
 
 
 func logToFile(message string) {
@@ -305,3 +479,4 @@ func logToFileCursor(index int) {
     defer file.Close()
     fmt.Fprintln(file, strconv.Itoa(index))
 }
+
