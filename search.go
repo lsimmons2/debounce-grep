@@ -88,7 +88,7 @@ func (fileSearcher *FileSearcher) getFileNames() []string{
 }
 
 func (fileSearcher *FileSearcher) getSearchMatchesByLine(searchTerm string) map[string][]int {
-    if len(fileSearcher.filesToSearch) > 0 {
+    if len(fileSearcher.filesToSearch) > 0  && len(searchTerm) > 0 {
         searchMatchesByLine := make(map[string][]int)
         for i := 0; i < len(fileSearcher.filesToSearch); i++ {
             lineNumbers := fileSearcher.filesToSearch[i].getLineNumbersOfSearchTerm(searchTerm)
@@ -187,8 +187,7 @@ func (searchManager *SearchManager) renderSearchTerm(){
     } else if searchManager.searchState == "NEGATIVE" {
         colorCode = "\u001b[31m"
     } else {
-        return
-        //THIS SHOULDN'T HAPPEN
+        return //THIS SHOULDN'T HAPPEN
     }
     searchManager.clearTerminalLine(searchManager.TERMINAL_SPACE_SEARCH_TERM_LINE)
     // no need to navigate to TERMINAL_SPACE_SEARCH_TERM_LINE
@@ -238,13 +237,7 @@ func (searchManager *SearchManager) deleteCharForwards() {
 }
 
 func (searchManager *SearchManager) addCharToSearchTerm(char string) {
-    if searchManager.cursorIndex == 0 {
-        searchManager.searchTerm = char + searchManager.searchTerm
-    } else if searchManager.cursorIndex == 1 {
-        searchManager.searchTerm = searchManager.searchTerm + char
-    } else {
-        searchManager.searchTerm = searchManager.searchTerm[:searchManager.cursorIndex] + char + searchManager.searchTerm[searchManager.cursorIndex:]
-    }
+    searchManager.searchTerm = searchManager.searchTerm[:searchManager.cursorIndex] + char + searchManager.searchTerm[searchManager.cursorIndex:]
     searchManager.incrementCursorIndex()
 }
 
@@ -255,19 +248,27 @@ func (searchManager *SearchManager) editSearchTermWithStdin(stdin []byte) {
         searchManager.searchState = "TYPING"
 
     } else if stdin[0] == 4 { // C-d
-        searchManager.deleteCharForwards()
-        searchManager.searchState = "TYPING"
+        if searchManager.cursorIndex < len(searchManager.searchTerm) {
+            searchManager.deleteCharForwards()
+            searchManager.searchState = "TYPING"
+        }
 
     } else if stdin[0] == 127 { // backspace
-        searchManager.deleteCharBackwards()
-        searchManager.decrementCursorIndex()
-        searchManager.searchState = "TYPING"
+        if searchManager.cursorIndex > 0 {
+            searchManager.deleteCharBackwards()
+            searchManager.decrementCursorIndex()
+            searchManager.searchState = "TYPING"
+        }
 
     } else if stdin[0] == 6 { // C-f
-        searchManager.incrementCursorIndex()
+        if searchManager.cursorIndex < len(searchManager.searchTerm) {
+            searchManager.incrementCursorIndex()
+        }
 
     } else if stdin[0] == 2 { // C-b
-        searchManager.decrementCursorIndex()
+        if searchManager.cursorIndex > 0 {
+            searchManager.decrementCursorIndex()
+        }
 
     } else {
         return
