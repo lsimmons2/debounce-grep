@@ -8,7 +8,6 @@ import (
     "os/exec"
     "path/filepath"
     "bufio"
-    "log"
     "strconv"
     "sort"
     "index/suffixarray"
@@ -29,13 +28,22 @@ var (
 )
 
 const (
+    DEBOUNCE_TIME_MS = 300
+    SPACE = " "
+    //ANSI escape codes to control stdout and cursor in terminal
     MAGENTA_COLOR_CODE = "\u001b[35m"
     RED_COLOR_CODE = "\u001b[31m"
     GREEN_COLOR_CODE = "\u001b[32m"
     BLUE_COLOR_CODE = "\u001b[34m"
     YELLOW_COLOR_CODE = "\u001b[33m"
     CANCEL_COLOR_CODE = "\u001b[0m"
-    SPACE = " "
+    CLEAR_LINE_CODE = "\033[K"
+    NAVIGATE_CURSOR_CODE = "\033[%d;%dH" // passed line and column numbers
+    //search term always displayed on this line of terminal
+    SEARCH_TERM_TERMINAL_LINE_NO = 2
+    //search matches always displayed in space bordered by these lines
+    SEARCH_MATCH_SPACE_START_TERMINAL_LINE_NO = 4
+    SEARCH_MATCH_SPACE_END_TERMINAL_LINE_NO = 34
 )
 
 type File struct {
@@ -116,7 +124,6 @@ func (lineWithMatches *LineWithMatches) renderMatchedLine() {
     words := strings.Split(lineToRender, SPACE)
     var currentLineLength int
     for _, word := range words {
-        logToFileCursor(currentLineLength)
         if lineWithMatches.wordWilllHitEndOfTty(word, currentLineLength) {
             fmt.Println("")
             lineWithMatches.renderIndent()
@@ -258,10 +265,6 @@ func (fileWithMatches *FileWithMatches) showHits() {
 
 type SearchManager struct {
     fileSearcher FileSearcher
-    DEBOUNCE_TIME_MS int
-    TERMINAL_SPACE_SEARCH_TERM_LINE int
-    SEARCH_MATCH_TERMINAL_SPACE_START_LINE int
-    SEARCH_MATCH_TERMINAL_SPACE_END_LINE int
     cursorIndex int
     searchTerm string
     searchState string
@@ -271,10 +274,6 @@ type SearchManager struct {
 
 func NewSearchManager() *SearchManager {
     searchManager := &SearchManager{}
-    searchManager.DEBOUNCE_TIME_MS = 300
-    searchManager.TERMINAL_SPACE_SEARCH_TERM_LINE = 2
-    searchManager.SEARCH_MATCH_TERMINAL_SPACE_START_LINE = 4
-    searchManager.SEARCH_MATCH_TERMINAL_SPACE_END_LINE = 34
     searchManager.cursorIndex = 0
     searchManager.selectedMatchIndex = 0
     searchManager.searchTerm = ""
@@ -310,7 +309,7 @@ func (searchManager *SearchManager) listenToStdinAndSearchFiles() {
                     searchManager.handleStdinCommands(stdin)
                 }
             //DEBOUNCE_TIME_MS has passed w/o any stdin
-            case <-time.After(time.Duration((1000000 * searchManager.DEBOUNCE_TIME_MS)) * time.Nanosecond):
+            case <-time.After(time.Duration((1000000 * DEBOUNCE_TIME_MS)) * time.Nanosecond):
                 if lastSearched != searchManager.searchTerm {
                     searchManager.searchForMatches()
                 }
@@ -333,7 +332,7 @@ func (searchManager *SearchManager) searchForMatches(){
 }
 
 func (searchManager *SearchManager) positionCursorAtIndex(){
-    fmt.Printf("\033[%d;%dH", searchManager.TERMINAL_SPACE_SEARCH_TERM_LINE, searchManager.cursorIndex+1)
+    fmt.Printf(NAVIGATE_CURSOR_CODE, SEARCH_TERM_TERMINAL_LINE_NO, searchManager.cursorIndex+1)
 }
 
 func (searchManager *SearchManager) renderSearchTerm(){
@@ -344,11 +343,9 @@ func (searchManager *SearchManager) renderSearchTerm(){
         colorCode = GREEN_COLOR_CODE
     } else if searchManager.searchState == "NEGATIVE" {
         colorCode = RED_COLOR_CODE
-    } else {
-        return //THIS SHOULDN'T HAPPEN
     }
-    searchManager.clearTerminalLine(searchManager.TERMINAL_SPACE_SEARCH_TERM_LINE)
-    // no need to navigate to TERMINAL_SPACE_SEARCH_TERM_LINE
+    searchManager.clearTerminalLine(SEARCH_TERM_TERMINAL_LINE_NO)
+    // no need to navigate to SEARCH_TERM_TERMINAL_LINE_NO
     // since cursor will be there after clearTerminalLine()
     fmt.Print(colorCode)
     fmt.Print(searchManager.searchTerm)
@@ -357,15 +354,17 @@ func (searchManager *SearchManager) renderSearchTerm(){
 }
 
 func (searchManager *SearchManager) clearTerminalLine(numberOfLineToClear int){
-    fmt.Printf("\033[%d;1H", numberOfLineToClear)
-    fmt.Printf("\033[K")
+    COLUMN := 1
+    fmt.Printf(NAVIGATE_CURSOR_CODE, numberOfLineToClear, COLUMN)
+    fmt.Printf(CLEAR_LINE_CODE)
 }
 
 func (searchManager *SearchManager) clearSearchMatchTerminalSpace(){
-    for i := searchManager.SEARCH_MATCH_TERMINAL_SPACE_START_LINE; i <= searchManager.SEARCH_MATCH_TERMINAL_SPACE_END_LINE; i++ {
+    for i := SEARCH_MATCH_SPACE_START_TERMINAL_LINE_NO; i <= SEARCH_MATCH_SPACE_END_TERMINAL_LINE_NO; i++ {
         searchManager.clearTerminalLine(i)
     }
-    fmt.Printf("\033[%d;1H", searchManager.SEARCH_MATCH_TERMINAL_SPACE_START_LINE)
+    COLUMN := 1
+    fmt.Printf(NAVIGATE_CURSOR_CODE, SEARCH_MATCH_SPACE_START_TERMINAL_LINE_NO, COLUMN)
 }
 
 func (searchManager *SearchManager) displaySearchMatches(){
@@ -471,32 +470,3 @@ func main() {
     searchManager := NewSearchManager()
     searchManager.listenToStdinAndSearchFiles()
 }
-
-
-func logToFile(message string) {
-    file, err := os.OpenFile("/home/leo/go/src/notes_searcher/log.log", os.O_APPEND|os.O_WRONLY, 0600)
-    if err != nil {
-        log.Fatal("Cannot create file", err)
-    }
-    defer file.Close()
-    fmt.Fprint(file, message)
-}
-
-func logToFileCursor(index int) {
-    file, err := os.OpenFile("/home/leo/go/src/notes_searcher/log.log", os.O_APPEND|os.O_WRONLY, 0600)
-    if err != nil {
-        log.Fatal("Cannot create file", err)
-    }
-    defer file.Close()
-    fmt.Fprintln(file, strconv.Itoa(index))
-}
-
-func logToFileInt(index int) {
-    file, err := os.OpenFile("/home/leo/go/src/notes_searcher/log.log", os.O_APPEND|os.O_WRONLY, 0600)
-    if err != nil {
-        log.Fatal("Cannot create file", err)
-    }
-    defer file.Close()
-    fmt.Fprint(file, strconv.Itoa(index))
-}
-
