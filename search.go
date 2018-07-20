@@ -124,13 +124,14 @@ func (lineWithMatches *LineWithMatches) renderMatchedLine() {
     words := strings.Split(lineToRender, SPACE)
     var currentLineLength int
     for _, word := range words {
-        if lineWithMatches.wordWilllHitEndOfTty(word, currentLineLength) {
+        lengthOfWord := lineWithMatches.getLengthOfWord(word)
+        if lineWithMatches.wordWilllHitEndOfTty(lengthOfWord, currentLineLength) {
             fmt.Println("")
             lineWithMatches.renderIndent()
             lineWithMatches.renderLineNoBufferSpace()
-            currentLineLength = (len(word) + len(SPACE))
+            currentLineLength = (lengthOfWord + len(SPACE))
         } else {
-            currentLineLength += (len(word) + len(SPACE))
+            currentLineLength += (lengthOfWord + len(SPACE))
         }
         fmt.Print(word)
         fmt.Print(SPACE)
@@ -138,9 +139,17 @@ func (lineWithMatches *LineWithMatches) renderMatchedLine() {
     fmt.Println("")
 }
 
-func (lineWithMatches *LineWithMatches) wordWilllHitEndOfTty(word string, currentLineLength int) bool {
+
+func (lineWithMatches *LineWithMatches) getLengthOfWord(word string) int {
+    //don't include color codes in length of word
+    wordWithoutColorCodes := strings.Replace(word, YELLOW_COLOR_CODE, "", 1)
+    wordWithoutColorCodes = strings.Replace(wordWithoutColorCodes, CANCEL_COLOR_CODE, "", 1)
+    return len(wordWithoutColorCodes)
+}
+
+func (lineWithMatches *LineWithMatches) wordWilllHitEndOfTty(lengthOfWord int, currentLineLength int) bool {
     ttyLength := ttyWidth - 1 - lineWithMatches.INDENT_LENGTH - lineWithMatches.LINE_NO_BUFFER_LENGTH
-    return (len(word) + currentLineLength) > ttyLength
+    return (lengthOfWord + currentLineLength) > ttyLength
 }
 
 func (lineWithMatches *LineWithMatches) renderIndent() {
