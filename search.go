@@ -25,6 +25,7 @@ func getTtyWidth() int {
 
 var (
     ttyWidth = getTtyWidth()
+    dir_to_search = os.Getenv("DEBOUNCE_GREP_DIR_TO_SEARCH")
 )
 
 const (
@@ -50,7 +51,6 @@ const (
     //number of spaces the text of matches are further
     //indented from SEARCH_MATCH_SPACE_INDENT
     SEARCH_MATCH_SPACE_LINE_NO_BUFFER = 3
-    DIR_TO_SEARCH = "/home/leo/org"
 )
 
 type File struct {
@@ -248,7 +248,7 @@ func NewSearchManager() *SearchManager {
 
 func (searchManager *SearchManager) getFilesToSearch() []File{
     var filesToSearch []File
-    err := filepath.Walk(DIR_TO_SEARCH, func(path string, info os.FileInfo, _ error) error {
+    err := filepath.Walk(dir_to_search, func(path string, info os.FileInfo, _ error) error {
         if info.IsDir() && info.Name() == "venv" || info.Name() == ".git"  {
             return filepath.SkipDir
         }
@@ -259,7 +259,7 @@ func (searchManager *SearchManager) getFilesToSearch() []File{
         return nil
     })
     if err != nil {
-        fmt.Printf("error walking the path %q: %v\n", DIR_TO_SEARCH, err)
+        fmt.Printf("error walking the path %q: %v\n", dir_to_search, err)
     }
     return filesToSearch
 }
@@ -409,6 +409,10 @@ func (searchManager *SearchManager) decrementSelectedMatchIndex() {
 
 func (searchManager *SearchManager) toggleSelectedMatchShouldShowHits() {
     searchManager.filesWithMatches[searchManager.selectedMatchIndex].shouldShowHits = !searchManager.filesWithMatches[searchManager.selectedMatchIndex].shouldShowHits
+}
+
+func (searchManager *SearchManager) showDir() {
+    logToFile(DIR_TO_SEARCH)
 }
 
 func (searchManager *SearchManager) handleStdinCommands(stdin []byte) {
