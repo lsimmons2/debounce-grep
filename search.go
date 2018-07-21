@@ -48,6 +48,17 @@ const (
 
 type File struct {
     path string
+    linesWithMatches []LineWithMatches
+    isSelected bool
+    shouldShowHits bool
+}
+
+func NewFile(filePath string, linesWithMatches []LineWithMatches) *File {
+    file := &File{}
+    file.path = filePath
+    file.isSelected = false
+    file.shouldShowHits = false
+    return file
 }
 
 func (file *File) hasShebang() bool{
@@ -76,6 +87,51 @@ func (file *File) fileLinesGenerator() <- chan string {
 	return ch
 }
 
+func (file *File) render() {
+    file.renderFilePath()
+    if file.shouldShowHits {
+        file.showHits()
+    }
+}
+
+func (file *File) renderFilePath() {
+    if file.isSelected {
+        fmt.Print(MAGENTA_COLOR_CODE)
+    }
+    fmt.Println(file.path)
+    if file.isSelected {
+        fmt.Print(CANCEL_COLOR_CODE)
+    }
+}
+
+func (file *File) showHits() {
+    //show lines in increasing order
+    sort.Slice(file.linesWithMatches, func(i, j int) bool {
+        return file.linesWithMatches[i].lineNo < file.linesWithMatches[j].lineNo
+    })
+    for _, lineWithMatches := range file.linesWithMatches {
+        lineWithMatches.renderMatchedLine()
+    }
+}
+
+func (file *File) getLinesWithMatches(searchTerm string) []LineWithMatches {
+    var linesWithMatches []LineWithMatches
+    lineNumber := 1
+    for line := range file.fileLinesGenerator(){
+        if strings.Contains(line, searchTerm) {
+            searchTermRegex := regexp.MustCompile(searchTerm)
+            index := suffixarray.New([]byte(line))
+            matchIndeces := index.FindAllIndex(searchTermRegex, -1)
+            lineWithMatches := *NewLineWithMatches(lineNumber, matchIndeces, line)
+            linesWithMatches = append(linesWithMatches, lineWithMatches)
+        }
+        lineNumber ++
+    }
+    return linesWithMatches
+}
+
+
+
 type LineWithMatches struct {
     lineNo int
     matchIndeces [][]int
@@ -103,6 +159,7 @@ func (lineWithMatches *LineWithMatches) renderMatchedLine() {
     lineWithMatches.renderIndent()
     lineWithMatches.renderLineNo()
     var lineToRender string
+    //insert color code and escape code around each match in line
     for charIndex, char := range lineWithMatches.text {
         nextMatchStartIndex := -1
         nextMatchEndIndex := -1
@@ -121,11 +178,13 @@ func (lineWithMatches *LineWithMatches) renderMatchedLine() {
             lineWithMatches.matchIndeces = append(lineWithMatches.matchIndeces[:0], lineWithMatches.matchIndeces[1:]...)
         }
     }
+    //print line word by word to ensure that line
+    //wrapping doesn't happen in middle of word
     words := strings.Split(lineToRender, SPACE)
     var currentLineLength int
     for _, word := range words {
         lengthOfWord := lineWithMatches.getLengthOfWord(word)
-        if lineWithMatches.wordWilllHitEndOfTty(lengthOfWord, currentLineLength) {
+        if lineWithMatches.wordWillHitEndOfTty(lengthOfWord, currentLineLength) {
             fmt.Println("")
             lineWithMatches.renderIndent()
             lineWithMatches.renderLineNoBufferSpace()
@@ -139,7 +198,6 @@ func (lineWithMatches *LineWithMatches) renderMatchedLine() {
     fmt.Println("")
 }
 
-
 func (lineWithMatches *LineWithMatches) getLengthOfWord(word string) int {
     //don't include color codes in length of word
     wordWithoutColorCodes := strings.Replace(word, YELLOW_COLOR_CODE, "", 1)
@@ -147,7 +205,7 @@ func (lineWithMatches *LineWithMatches) getLengthOfWord(word string) int {
     return len(wordWithoutColorCodes)
 }
 
-func (lineWithMatches *LineWithMatches) wordWilllHitEndOfTty(lengthOfWord int, currentLineLength int) bool {
+func (lineWithMatches *LineWithMatches) wordWillHitEndOfTty(lengthOfWord int, currentLineLength int) bool {
     ttyLength := ttyWidth - 1 - lineWithMatches.INDENT_LENGTH - lineWithMatches.LINE_NO_BUFFER_LENGTH
     return (lengthOfWord + currentLineLength) > ttyLength
 }
@@ -164,121 +222,15 @@ func (lineWithMatches *LineWithMatches) renderLineNoBufferSpace() {
     }
 }
 
-func (file *File) getLinesWithMatches(searchTerm string) []LineWithMatches {
-    var linesWithMatches []LineWithMatches
-    lineNumber := 1
-    for line := range file.fileLinesGenerator(){
-        if strings.Contains(line, searchTerm) {
-            searchTermRegex := regexp.MustCompile(searchTerm)
-            index := suffixarray.New([]byte(line))
-            matchIndeces := index.FindAllIndex(searchTermRegex, -1)
-            lineWithMatches := *NewLineWithMatches(lineNumber, matchIndeces, line)
-            linesWithMatches = append(linesWithMatches, lineWithMatches)
-        }
-        lineNumber ++
-    }
-    return linesWithMatches
-}
 
-
-
-type FileSearcher struct {
-    filesToSearch []File
-}
-
-func NewFileSearcher() *FileSearcher {
-    fileSearcher := &FileSearcher{}
-    dir := "/home/leo/org"
-    err := filepath.Walk(dir, func(path string, info os.FileInfo, _ error) error {
-        if info.IsDir() && info.Name() == "venv" || info.Name() == ".git"  {
-            return filepath.SkipDir
-        }
-        file := File{path: path}
-        if file.hasShebang() {
-            fileSearcher.filesToSearch = append(fileSearcher.filesToSearch, file)
-        }
-        return nil
-    })
-    if err != nil {
-        fmt.Printf("error walking the path %q: %v\n", dir, err)
-    }
-    return fileSearcher
-}
-
-func (fileSearcher *FileSearcher) getFileNames() []string{
-    var fileNames []string
-    for i := 0; i < len(fileSearcher.filesToSearch); i++ {
-        fileNames = append(fileNames, fileSearcher.filesToSearch[i].path)
-    }
-    return fileNames
-}
-
-func (fileSearcher *FileSearcher) getFilesWithMatches(searchTerm string) []FileWithMatches {
-    if len(fileSearcher.filesToSearch) > 0  && len(searchTerm) > 0 {
-        var filesWithMatches []FileWithMatches
-        for i := 0; i < len(fileSearcher.filesToSearch); i++ {
-            var fileWithMatches FileWithMatches
-            linesWithMatches := fileSearcher.filesToSearch[i].getLinesWithMatches(searchTerm)
-            if len(linesWithMatches) > 0 {
-                filePath := fileSearcher.filesToSearch[i].path
-                fileWithMatches = *NewFileWithMatches(filePath, linesWithMatches)
-                filesWithMatches = append(filesWithMatches, fileWithMatches)
-            }
-        }
-        return filesWithMatches
-    }
-    return nil
-}
-
-type FileWithMatches struct {
-    filePath string
-    linesWithMatches []LineWithMatches
-    isSelected bool
-    shouldShowHits bool
-}
-
-func NewFileWithMatches(filePath string, linesWithMatches []LineWithMatches) *FileWithMatches {
-    fileWithMatches := &FileWithMatches{}
-    fileWithMatches.filePath = filePath
-    fileWithMatches.linesWithMatches = linesWithMatches
-    fileWithMatches.isSelected = false
-    fileWithMatches.shouldShowHits = false
-    return fileWithMatches
-}
-
-func (fileWithMatches *FileWithMatches) render() {
-    fileWithMatches.renderFilePath()
-    if fileWithMatches.shouldShowHits {
-        fileWithMatches.showHits()
-    }
-}
-
-func (fileWithMatches *FileWithMatches) renderFilePath() {
-    if fileWithMatches.isSelected {
-        fmt.Print(MAGENTA_COLOR_CODE)
-    }
-    fmt.Println(fileWithMatches.filePath)
-    if fileWithMatches.isSelected {
-        fmt.Print(CANCEL_COLOR_CODE)
-    }
-}
-
-func (fileWithMatches *FileWithMatches) showHits() {
-    sort.Slice(fileWithMatches.linesWithMatches, func(i, j int) bool {
-        return fileWithMatches.linesWithMatches[i].lineNo < fileWithMatches.linesWithMatches[j].lineNo
-    })
-    for _, lineWithMatches := range fileWithMatches.linesWithMatches {
-        lineWithMatches.renderMatchedLine()
-    }
-}
 
 type SearchManager struct {
-    fileSearcher FileSearcher
     cursorIndex int
     searchTerm string
     searchState string
     selectedMatchIndex int
-    filesWithMatches []FileWithMatches
+    filesToSearch []File
+    filesWithMatches []File
 }
 
 func NewSearchManager() *SearchManager {
@@ -287,8 +239,41 @@ func NewSearchManager() *SearchManager {
     searchManager.selectedMatchIndex = 0
     searchManager.searchTerm = ""
     searchManager.searchState = "TYPING"
-    searchManager.fileSearcher = *NewFileSearcher()
+    searchManager.filesToSearch = searchManager.getFilesToSearch()
     return searchManager
+}
+
+func (searchManager *SearchManager) getFilesToSearch() []File{
+    dir = "/home/leo/org"
+    var filesToSearch []File
+    err := filepath.Walk(dir, func(path string, info os.FileInfo, _ error) error {
+        if info.IsDir() && info.Name() == "venv" || info.Name() == ".git"  {
+            return filepath.SkipDir
+        }
+        file := File{path: path}
+        if file.hasShebang() {
+            filesToSearch = append(filesToSearch, file)
+        }
+        return nil
+    })
+    if err != nil {
+        fmt.Printf("error walking the path %q: %v\n", dir, err)
+    }
+    return filesToSearch
+}
+
+func (searchManager *SearchManager) getFilesWithMatches(searchTerm string) []File {
+    if len(searchManager.filesToSearch) > 0  && len(searchTerm) > 0 {
+        var filesWithMatches []File
+        for i := 0; i < len(searchManager.filesToSearch); i++ {
+            searchManager.filesToSearch[i].linesWithMatches = searchManager.filesToSearch[i].getLinesWithMatches(searchTerm)
+            if len(searchManager.filesToSearch[i].linesWithMatches) > 0 {
+                filesWithMatches = append(filesWithMatches, searchManager.filesToSearch[i])
+            }
+        }
+        return filesWithMatches
+    }
+    return nil
 }
 
 func (searchManager *SearchManager) listenToStdinAndSearchFiles() {
@@ -328,7 +313,7 @@ func (searchManager *SearchManager) listenToStdinAndSearchFiles() {
 }
 
 func (searchManager *SearchManager) searchForMatches(){
-    searchManager.filesWithMatches = searchManager.fileSearcher.getFilesWithMatches(searchManager.searchTerm)
+    searchManager.filesWithMatches = searchManager.getFilesWithMatches(searchManager.searchTerm)
     if len(searchManager.filesWithMatches) == 0 {
         searchManager.searchState = "NEGATIVE"
         searchManager.selectedMatchIndex = 0
