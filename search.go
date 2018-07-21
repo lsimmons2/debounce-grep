@@ -44,6 +44,13 @@ const (
     //search matches always displayed in space bordered by these lines
     SEARCH_MATCH_SPACE_START_TERMINAL_LINE_NO = 4
     SEARCH_MATCH_SPACE_END_TERMINAL_LINE_NO = 34
+    //number of spaces the line numbers of matches are
+    //indented from left border of terminal window
+    SEARCH_MATCH_SPACE_INDENT = 3
+    //number of spaces the text of matches are further
+    //indented from SEARCH_MATCH_SPACE_INDENT
+    SEARCH_MATCH_SPACE_LINE_NO_BUFFER = 3
+    DIR_TO_SEARCH = "/home/leo/org"
 )
 
 type File struct {
@@ -136,8 +143,6 @@ type LineWithMatches struct {
     lineNo int
     matchIndeces [][]int
     text string
-    INDENT_LENGTH int
-    LINE_NO_BUFFER_LENGTH int
 }
 
 func NewLineWithMatches(lineNo int, matchIndeces [][]int, lineText string) *LineWithMatches {
@@ -145,8 +150,6 @@ func NewLineWithMatches(lineNo int, matchIndeces [][]int, lineText string) *Line
     lineWithMatches.lineNo = lineNo
     lineWithMatches.matchIndeces = matchIndeces
     lineWithMatches.text = lineText
-    lineWithMatches.INDENT_LENGTH = 3
-    lineWithMatches.LINE_NO_BUFFER_LENGTH = 3
     return lineWithMatches
 }
 
@@ -206,18 +209,18 @@ func (lineWithMatches *LineWithMatches) getLengthOfWord(word string) int {
 }
 
 func (lineWithMatches *LineWithMatches) wordWillHitEndOfTty(lengthOfWord int, currentLineLength int) bool {
-    ttyLength := ttyWidth - 1 - lineWithMatches.INDENT_LENGTH - lineWithMatches.LINE_NO_BUFFER_LENGTH
+    ttyLength := ttyWidth - 1 - SEARCH_MATCH_SPACE_INDENT - SEARCH_MATCH_SPACE_LINE_NO_BUFFER
     return (lengthOfWord + currentLineLength) > ttyLength
 }
 
 func (lineWithMatches *LineWithMatches) renderIndent() {
-    for i := 1; i <= lineWithMatches.INDENT_LENGTH; i++ { 
+    for i := 1; i <= SEARCH_MATCH_SPACE_INDENT; i++ { 
         fmt.Print(SPACE)
     }
 }
 
 func (lineWithMatches *LineWithMatches) renderLineNoBufferSpace() {
-    for i := 1; i <= lineWithMatches.LINE_NO_BUFFER_LENGTH; i++ { 
+    for i := 1; i <= SEARCH_MATCH_SPACE_LINE_NO_BUFFER; i++ { 
         fmt.Print(SPACE)
     }
 }
@@ -244,9 +247,8 @@ func NewSearchManager() *SearchManager {
 }
 
 func (searchManager *SearchManager) getFilesToSearch() []File{
-    dir = "/home/leo/org"
     var filesToSearch []File
-    err := filepath.Walk(dir, func(path string, info os.FileInfo, _ error) error {
+    err := filepath.Walk(DIR_TO_SEARCH, func(path string, info os.FileInfo, _ error) error {
         if info.IsDir() && info.Name() == "venv" || info.Name() == ".git"  {
             return filepath.SkipDir
         }
@@ -257,7 +259,7 @@ func (searchManager *SearchManager) getFilesToSearch() []File{
         return nil
     })
     if err != nil {
-        fmt.Printf("error walking the path %q: %v\n", dir, err)
+        fmt.Printf("error walking the path %q: %v\n", DIR_TO_SEARCH, err)
     }
     return filesToSearch
 }
