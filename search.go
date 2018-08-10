@@ -6,12 +6,14 @@ import (
     "time"
     "os"
     "os/exec"
+    "os/user"
     "path/filepath"
     "bufio"
     "strconv"
     "sort"
     "index/suffixarray"
     "regexp"
+    "github.com/mattn/go-zglob"
 )
 
 
@@ -23,13 +25,77 @@ func getTtyWidth() int {
     return columnCount - 1 // not sure why this is off by one
 }
 
+func getDirToSearch() string {
+    dirToSearchEnvVariable := os.Getenv("DEBOUNCE_GREP_DIR_TO_SEARCH")
+    //check if dir exists
+    _, err := os.Stat(dirToSearchEnvVariable)
+    if err == nil {
+        return dirToSearchEnvVariable
+    }
+    usr, _ := user.Current()
+    return usr.HomeDir
+}
+
+func getDebounceTimeMS() int {
+    //default debounce time is 200 ms
+    var debounceTimeMs int
+    debounceTimeMsEnvVariable := os.Getenv("DEBOUNCE_GREP_DEBOUNCE_TIME_MS")
+    if len(debounceTimeMsEnvVariable) == 0 {
+        return 200
+    }
+    debounceTimeMs, err := strconv.Atoi(debounceTimeMsEnvVariable)
+    if err != nil {
+        fmt.Println("DEBOUNCE_GREP_DEBOUNCE_TIME_MS environmental variable was not able to be converted into type int, defaulting to value 200.")
+        return 200
+    }
+    return debounceTimeMs
+}
+
+func getEnvVariableList(envVariableName string) []string {
+    envVariable := os.Getenv(envVariableName)
+    if len(envVariable) == 0 {
+        return nil
+    }
+    return strings.Split(envVariable, ":")
+}
+
+func getFileShebangs() []string {
+    return getEnvVariableList("DEBOUNCE_GREP_FILE_SHEBANG")
+}
+
+func getFullPathsToIgnore() []string {
+    toIgnorePatterns := getEnvVariableList("DEBOUNCE_GREP_FILES_DIRS_TO_IGNORE")
+    var toIgnorePaths []string
+    for _, dirToSearch := range dirsToSearch {
+        for _, toIgnorePattern := range toIgnorePatterns {
+            toIgnoreMatches, _ := zglob.Glob(dirToSearch + "/" + toIgnorePattern)
+            toIgnorePaths = append(toIgnorePaths, toIgnoreMatches...)
+        }
+    }
+    return toIgnorePaths
+}
+
+func getDirsToSearch() []string {
+    var dirsToSearchFromEnv []string
+    dirsToSearchFromEnv = getEnvVariableList("DEBOUNCE_GREP_FILES_DIRS_TO_SEARCH")
+    if len(dirsToSearchFromEnv) == 0 {
+        cwd, _ := filepath.Abs(filepath.Dir(os.Args[0]))
+        dirsToSearchFromEnv = append(dirsToSearchFromEnv, cwd)
+    }
+    return dirsToSearchFromEnv
+}
+
 var (
     ttyWidth = getTtyWidth()
-    dir_to_search = os.Getenv("DEBOUNCE_GREP_DIR_TO_SEARCH")
+    debounceTimeMs = getDebounceTimeMS()
+    //type of shebang or mark that user can specify to only
+    //include files that contain shebang
+    fileShebangs = getFileShebangs()
+    dirsToSearch = getDirsToSearch()
+    fullPathsToIgnore = getFullPathsToIgnore()
 )
 
 const (
-    DEBOUNCE_TIME_MS = 300
     SPACE = " "
     //ANSI escape codes to control stdout and cursor in terminal
     MAGENTA_COLOR_CODE = "\u001b[35m"
@@ -53,6 +119,8 @@ const (
     SEARCH_MATCH_SPACE_LINE_NO_BUFFER = 3
 )
 
+
+
 type File struct {
     path string
     linesWithMatches []LineWithMatches
@@ -69,9 +137,14 @@ func NewFile(filePath string, linesWithMatches []LineWithMatches) *File {
 }
 
 func (file *File) hasShebang() bool{
+    if fileShebangs == nil {
+        return true
+    }
     for line := range file.fileLinesGenerator(){
-        if line == "*study" {
-            return true
+        for _, shebang := range fileShebangs {
+            if line == shebang {
+                return true
+            }
         }
     }
     return false
@@ -80,10 +153,7 @@ func (file *File) hasShebang() bool{
 func (file *File) fileLinesGenerator() <- chan string {
 	ch := make(chan string)
 	go func() {
-        file, err := os.Open(file.path)
-        if err != nil {
-            fmt.Printf("type: %T; value: %q\n", err, err)
-        }
+        file, _ := os.Open(file.path)
         defer file.Close()
         scanner := bufio.NewScanner(file)
         for scanner.Scan() {
@@ -234,6 +304,8 @@ type SearchManager struct {
     selectedMatchIndex int
     filesToSearch []File
     filesWithMatches []File
+    searchingMessageLastPrinted string
+    timeLastPrintedSearchMessage int64
 }
 
 func NewSearchManager() *SearchManager {
@@ -243,31 +315,72 @@ func NewSearchManager() *SearchManager {
     searchManager.searchTerm = ""
     searchManager.searchState = "TYPING"
     searchManager.filesToSearch = searchManager.getFilesToSearch()
+    searchManager.searchingMessageLastPrinted = ""
+    searchManager.timeLastPrintedSearchMessage = time.Now().UnixNano()
     return searchManager
 }
 
-func (searchManager *SearchManager) getFilesToSearch() []File{
-    var filesToSearch []File
-    err := filepath.Walk(dir_to_search, func(path string, info os.FileInfo, _ error) error {
-        if info.IsDir() && info.Name() == "venv" || info.Name() == ".git"  {
-            return filepath.SkipDir
+func (searchManager *SearchManager) printSearchingMessage(searchMessageTemplate string) {
+    if time.Now().UnixNano() - searchManager.timeLastPrintedSearchMessage >= 150000000 {
+        var searchMessage string
+        if searchManager.searchingMessageLastPrinted == "" {
+            searchMessage = searchMessageTemplate
+        } else if searchManager.searchingMessageLastPrinted == searchMessageTemplate {
+            searchMessage = searchMessageTemplate + "."
+        } else if searchManager.searchingMessageLastPrinted == searchMessageTemplate + "." {
+            searchMessage = searchMessageTemplate + ".."
+        } else if searchManager.searchingMessageLastPrinted == searchMessageTemplate + ".." {
+            searchMessage = searchMessageTemplate + "..."
+        } else if searchManager.searchingMessageLastPrinted == searchMessageTemplate + "..." {
+            searchMessage = searchMessageTemplate
         }
-        file := File{path: path}
-        if file.hasShebang() {
-            filesToSearch = append(filesToSearch, file)
-        }
-        return nil
-    })
-    if err != nil {
-        fmt.Printf("error walking the path %q: %v\n", dir_to_search, err)
+        searchManager.printAtSearchTermLine(searchMessage)
+        searchManager.searchingMessageLastPrinted = searchMessage
+        searchManager.timeLastPrintedSearchMessage = time.Now().UnixNano()
     }
+}
+
+func (searchManager *SearchManager) getFilesToSearch() []File {
+    var skipped []string
+    var filesToSearch []File
+    for _, dirToSearch := range dirsToSearch {
+        err := filepath.Walk(dirToSearch, func(path string, info os.FileInfo, _ error) error {
+            shouldSkipFile := false
+            searchManager.printSearchingMessage("Gathering files to search")
+            for _, pathToIgnore := range fullPathsToIgnore {
+                if pathToIgnore == path {
+                    skipped = append(skipped, path)
+                    if info.IsDir() {
+                        return filepath.SkipDir
+                    } else {
+                        shouldSkipFile = true
+                    }
+                }
+            }
+            file := File{path: path}
+            if file.hasShebang() && !shouldSkipFile {
+                filesToSearch = append(filesToSearch, file)
+            }
+            return nil
+        })
+        if err != nil {
+            fmt.Printf("error walking the path %q: %v\n", dirToSearch, err)
+        }
+    }
+    searchManager.printAtSearchTermLine("Ready To Search")
     return filesToSearch
+}
+
+func (searchManager *SearchManager) printAtSearchTermLine(toPrint string) {
+    searchManager.clearSearchMatchTerminalSpace()
+    fmt.Print(toPrint)
 }
 
 func (searchManager *SearchManager) getFilesWithMatches(searchTerm string) []File {
     if len(searchManager.filesToSearch) > 0  && len(searchTerm) > 0 {
         var filesWithMatches []File
         for i := 0; i < len(searchManager.filesToSearch); i++ {
+            searchManager.printSearchingMessage("Searching files")
             searchManager.filesToSearch[i].linesWithMatches = searchManager.filesToSearch[i].getLinesWithMatches(searchTerm)
             if len(searchManager.filesToSearch[i].linesWithMatches) > 0 {
                 filesWithMatches = append(filesWithMatches, searchManager.filesToSearch[i])
@@ -304,8 +417,8 @@ func (searchManager *SearchManager) listenToStdinAndSearchFiles() {
                 } else {
                     searchManager.handleStdinCommands(stdin)
                 }
-            //DEBOUNCE_TIME_MS has passed w/o any stdin
-            case <-time.After(time.Duration((1000000 * DEBOUNCE_TIME_MS)) * time.Nanosecond):
+            //debounceTimeMs has passed w/o any stdin
+            case <-time.After(time.Duration((1000000 * debounceTimeMs)) * time.Nanosecond):
                 if lastSearched != searchManager.searchTerm {
                     searchManager.searchForMatches()
                 }
@@ -365,6 +478,8 @@ func (searchManager *SearchManager) clearSearchMatchTerminalSpace(){
 
 func (searchManager *SearchManager) displaySearchMatches(){
     searchManager.clearSearchMatchTerminalSpace()
+    searchManager.positionCursorAtIndex()
+    fmt.Println("")
     if len(searchManager.filesWithMatches) > 0 {
         for index, fileWithMatches := range searchManager.filesWithMatches {
             if index == searchManager.selectedMatchIndex {
@@ -409,10 +524,6 @@ func (searchManager *SearchManager) decrementSelectedMatchIndex() {
 
 func (searchManager *SearchManager) toggleSelectedMatchShouldShowHits() {
     searchManager.filesWithMatches[searchManager.selectedMatchIndex].shouldShowHits = !searchManager.filesWithMatches[searchManager.selectedMatchIndex].shouldShowHits
-}
-
-func (searchManager *SearchManager) showDir() {
-    logToFile(DIR_TO_SEARCH)
 }
 
 func (searchManager *SearchManager) handleStdinCommands(stdin []byte) {
