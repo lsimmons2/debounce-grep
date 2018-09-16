@@ -14,15 +14,33 @@ import (
     "index/suffixarray"
     "regexp"
     "github.com/mattn/go-zglob"
+    "log"
 )
 
 
-func getTtyWidth() int {
-    cmd := exec.Command("tput", "cols")
-    cmd.Stdin = os.Stdin
-    out, _ := cmd.Output()
-    columnCount, _ := strconv.Atoi(string(out)[:2])
-    return columnCount - 1 // not sure why this is off by one
+func setUpLogging() int{
+    f, err := os.OpenFile("log.log", os.O_RDWR | os.O_CREATE | os.O_APPEND, 0666)
+    if err != nil {
+        log.Fatalf("error opening file: %v", err)
+    }
+    //defer f.Close()
+    log.SetOutput(f)
+    return 1
+}
+
+
+func getTtyDimensions() (int, int) {
+    colsCmd := exec.Command("tput", "cols")
+    colsCmd.Stdin = os.Stdin
+    colsOut, _ := colsCmd.Output()
+    columnCount, _ := strconv.Atoi(string(colsOut)[:2])
+
+    rowsCmd := exec.Command("tput", "lines")
+    rowsCmd.Stdin = os.Stdin
+    rowsOut, _ := rowsCmd.Output()
+    rowCount, _ := strconv.Atoi(string(rowsOut)[:2])
+    log.Printf("Detected tty dimensions: %v x %v.", rowCount, columnCount)
+    return rowCount, columnCount // not sure why this is off by one
 }
 
 func getDirToSearch() string {
@@ -86,7 +104,10 @@ func getDirsToSearch() []string {
 }
 
 var (
-    ttyWidth = getTtyWidth()
+    //only declaring this var so that logging is initialized before
+    //other variables are declared
+    sah = setUpLogging()
+    ttyHeight, ttyWidth = getTtyDimensions()
     debounceTimeMs = getDebounceTimeMS()
     //type of shebang or mark that user can specify to only
     //include files that contain shebang
@@ -110,7 +131,7 @@ const (
     SEARCH_TERM_TERMINAL_LINE_NO = 2
     //search matches always displayed in space bordered by these lines
     SEARCH_MATCH_SPACE_START_TERMINAL_LINE_NO = 4
-    SEARCH_MATCH_SPACE_END_TERMINAL_LINE_NO = 34
+    //SEARCH_MATCH_SPACE_END_TERMINAL_LINE_NO = 34
     //number of spaces the line numbers of matches are
     //indented from left border of terminal window
     SEARCH_MATCH_SPACE_INDENT = 3
@@ -462,18 +483,21 @@ func (searchManager *SearchManager) renderSearchTerm(){
     searchManager.positionCursorAtIndex()
 }
 
+func (searchManager *SearchManager) navigateToLineAndColumn(line int, column int){
+    fmt.Printf(NAVIGATE_CURSOR_CODE, line, column)
+}
+
 func (searchManager *SearchManager) clearTerminalLine(numberOfLineToClear int){
-    COLUMN := 1
-    fmt.Printf(NAVIGATE_CURSOR_CODE, numberOfLineToClear, COLUMN)
+    searchManager.navigateToLineAndColumn(numberOfLineToClear, 1)
     fmt.Printf(CLEAR_LINE_CODE)
 }
 
 func (searchManager *SearchManager) clearSearchMatchTerminalSpace(){
-    for i := SEARCH_MATCH_SPACE_START_TERMINAL_LINE_NO; i <= SEARCH_MATCH_SPACE_END_TERMINAL_LINE_NO; i++ {
+    log.Printf("Clearing terminal search space.")
+    for i := SEARCH_MATCH_SPACE_START_TERMINAL_LINE_NO; i <= ttyHeight; i++ {
         searchManager.clearTerminalLine(i)
     }
-    COLUMN := 1
-    fmt.Printf(NAVIGATE_CURSOR_CODE, SEARCH_MATCH_SPACE_START_TERMINAL_LINE_NO, COLUMN)
+    searchManager.navigateToLineAndColumn(SEARCH_MATCH_SPACE_START_TERMINAL_LINE_NO, 1)
 }
 
 func (searchManager *SearchManager) displaySearchMatches(){
@@ -580,4 +604,5 @@ func (searchManager *SearchManager) handleStdinCommands(stdin []byte) {
 func main() {
     searchManager := NewSearchManager()
     searchManager.listenToStdinAndSearchFiles()
+    //getTtyDimensions()
 }
