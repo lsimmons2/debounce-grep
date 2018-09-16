@@ -515,6 +515,9 @@ func (searchManager *SearchManager) renderSearchMatches(){
     searchManager.navigateToLineAndColumn(1, 1)
     if len(searchManager.filesWithMatches) > 0 {
         for index := searchManager.matchIndexAtTopOfWindow; index <= searchManager.matchIndexAtTopOfWindow + ttyHeight - 2; index++ {
+            if len(searchManager.filesWithMatches) <= index {
+                break
+            }
             fileWithMatches := searchManager.filesWithMatches[index]
             if index == searchManager.selectedMatchIndex {
                 fileWithMatches.isSelected = true
