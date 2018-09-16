@@ -15,8 +15,18 @@ import (
     "regexp"
     "github.com/mattn/go-zglob"
     "log"
+    "math"
+    "github.com/maxmclau/gput"
 )
 
+//this can be done with math.Round in go 1.10
+func round(x float64) int {
+    t := math.Trunc(x)
+    if math.Abs(x-t) >= 0.5 {
+        return int(t + math.Copysign(1, x))
+    }
+    return int(t)
+}
 
 func setUpLogging() int{
     f, err := os.OpenFile("log.log", os.O_RDWR | os.O_CREATE | os.O_APPEND, 0666)
@@ -28,19 +38,11 @@ func setUpLogging() int{
     return 1
 }
 
-
 func getTtyDimensions() (int, int) {
-    colsCmd := exec.Command("tput", "cols")
-    colsCmd.Stdin = os.Stdin
-    colsOut, _ := colsCmd.Output()
-    columnCount, _ := strconv.Atoi(string(colsOut)[:2])
-
-    rowsCmd := exec.Command("tput", "lines")
-    rowsCmd.Stdin = os.Stdin
-    rowsOut, _ := rowsCmd.Output()
-    rowCount, _ := strconv.Atoi(string(rowsOut)[:2])
-    log.Printf("Detected tty dimensions: %v x %v.", rowCount, columnCount)
-    return rowCount, columnCount // not sure why this is off by one
+    lines := gput.Lines()
+    cols := gput.Cols()
+    log.Printf("Detected tty dimensions: %v x %v.", lines, cols)
+    return lines, cols
 }
 
 func getDirToSearch() string {
@@ -122,15 +124,16 @@ const (
     MAGENTA_COLOR_CODE = "\u001b[35m"
     RED_COLOR_CODE = "\u001b[31m"
     GREEN_COLOR_CODE = "\u001b[32m"
+    GREEN_BACKGROUND_COLOR_CODE = "\u001b[42m"
     BLUE_COLOR_CODE = "\u001b[34m"
     YELLOW_COLOR_CODE = "\u001b[33m"
     CANCEL_COLOR_CODE = "\u001b[0m"
     CLEAR_LINE_CODE = "\033[K"
     NAVIGATE_CURSOR_CODE = "\033[%d;%dH" // passed line and column numbers
-    //search term always displayed on this line of terminal
-    SEARCH_TERM_TERMINAL_LINE_NO = 2
-    //search matches always displayed in space bordered by these lines
-    SEARCH_MATCH_SPACE_START_TERMINAL_LINE_NO = 4
+    //search term always rendered on this line of terminal
+    SEARCH_TERM_TERMINAL_LINE_NO = 1
+    //search matches always rendered in space bordered by these lines
+    SEARCH_MATCH_SPACE_START_TERMINAL_LINE_NO = 2
     //SEARCH_MATCH_SPACE_END_TERMINAL_LINE_NO = 34
     //number of spaces the line numbers of matches are
     //indented from left border of terminal window
@@ -196,7 +199,7 @@ func (file *File) renderFilePath() {
     if file.isSelected {
         fmt.Print(MAGENTA_COLOR_CODE)
     }
-    fmt.Println(file.path)
+    fmt.Print(file.path)
     if file.isSelected {
         fmt.Print(CANCEL_COLOR_CODE)
     }
@@ -327,6 +330,8 @@ type SearchManager struct {
     filesWithMatches []File
     searchingMessageLastPrinted string
     timeLastPrintedSearchMessage int64
+    matchIndexAtTopOfWindow int
+    cursorLineNo int
 }
 
 func NewSearchManager() *SearchManager {
@@ -450,6 +455,7 @@ func (searchManager *SearchManager) listenToStdinAndSearchFiles() {
 
 func (searchManager *SearchManager) searchForMatches(){
     searchManager.filesWithMatches = searchManager.getFilesWithMatches(searchManager.searchTerm)
+    log.Printf("%v matches found.", len(searchManager.filesWithMatches))
     if len(searchManager.filesWithMatches) == 0 {
         searchManager.searchState = "NEGATIVE"
         searchManager.selectedMatchIndex = 0
@@ -457,12 +463,16 @@ func (searchManager *SearchManager) searchForMatches(){
         searchManager.searchState = "POSITIVE"
         searchManager.selectedMatchIndex = 0
     }
+    searchManager.matchIndexAtTopOfWindow = 0
+    searchManager.cursorLineNo = 2
     searchManager.renderSearchTerm()
-    searchManager.displaySearchMatches()
+    searchManager.renderSearchMatches()
+    searchManager.renderScrollBar()
 }
 
 func (searchManager *SearchManager) positionCursorAtIndex(){
-    fmt.Printf(NAVIGATE_CURSOR_CODE, SEARCH_TERM_TERMINAL_LINE_NO, searchManager.cursorIndex+1)
+    log.Printf("Positioning cursor at index at %vx%v.", SEARCH_TERM_TERMINAL_LINE_NO, searchManager.cursorIndex+1)
+    searchManager.navigateToLineAndColumn(SEARCH_TERM_TERMINAL_LINE_NO, searchManager.cursorIndex+1)
 }
 
 func (searchManager *SearchManager) renderSearchTerm(){
@@ -500,19 +510,39 @@ func (searchManager *SearchManager) clearSearchMatchTerminalSpace(){
     searchManager.navigateToLineAndColumn(SEARCH_MATCH_SPACE_START_TERMINAL_LINE_NO, 1)
 }
 
-func (searchManager *SearchManager) displaySearchMatches(){
+func (searchManager *SearchManager) renderSearchMatches(){
     searchManager.clearSearchMatchTerminalSpace()
-    searchManager.positionCursorAtIndex()
-    fmt.Println("")
+    searchManager.navigateToLineAndColumn(1, 1)
     if len(searchManager.filesWithMatches) > 0 {
-        for index, fileWithMatches := range searchManager.filesWithMatches {
+        for index := searchManager.matchIndexAtTopOfWindow; index <= searchManager.matchIndexAtTopOfWindow + ttyHeight - 2; index++ {
+            fileWithMatches := searchManager.filesWithMatches[index]
             if index == searchManager.selectedMatchIndex {
                 fileWithMatches.isSelected = true
             } else {
                 fileWithMatches.isSelected = false
             }
+            fmt.Println("")
             fileWithMatches.render()
         }
+    }
+    searchManager.positionCursorAtIndex()
+}
+
+func (searchManager *SearchManager) renderScrollBar(){
+    if len(searchManager.filesWithMatches) < ttyHeight {
+        log.Printf("100%% of matches shown in tty window, not rendering scroll bar.")
+        return
+    }
+    percentageMatchesShown := float64(ttyHeight) / float64(len(searchManager.filesWithMatches))
+    heightOfScrollBar := round(percentageMatchesShown * float64(ttyHeight))
+    log.Printf("Calculated scroll bar height to be %v lines (%.2f%% of tty height %v).", heightOfScrollBar, percentageMatchesShown, ttyHeight)
+    scrollBarStartLine := int((float64(searchManager.matchIndexAtTopOfWindow) / float64(len(searchManager.filesWithMatches))) * float64(ttyHeight))
+    log.Printf("Caclulated scroll bar to start from %v.", scrollBarStartLine)
+    for i := scrollBarStartLine + 1; i <= scrollBarStartLine + heightOfScrollBar; i++ {
+        searchManager.navigateToLineAndColumn(i, ttyWidth)
+        fmt.Printf(GREEN_BACKGROUND_COLOR_CODE)
+        fmt.Printf(" ")
+        fmt.Printf(CANCEL_COLOR_CODE)
     }
     searchManager.positionCursorAtIndex()
 }
@@ -540,10 +570,27 @@ func (searchManager *SearchManager) addCharToSearchTerm(char string) {
 
 func (searchManager *SearchManager) incrementSelectedMatchIndex() {
     searchManager.selectedMatchIndex += 1
+    log.Printf("searchManager.selectedMatchIndex incremented to %v", searchManager.selectedMatchIndex)
+    log.Printf("cursorLineNo  %v and ttyHeight %v", searchManager.cursorLineNo , ttyHeight)
+    if searchManager.cursorLineNo == ttyHeight {
+        searchManager.matchIndexAtTopOfWindow += 1
+        log.Printf("searchManager.matchIndexAtTopOfWindow incremented to %v", searchManager.matchIndexAtTopOfWindow)
+    } else {
+        searchManager.cursorLineNo += 1
+        log.Printf("searchManager.cursorLineNo incremented to %v", searchManager.cursorLineNo)
+    }
 }
 
 func (searchManager *SearchManager) decrementSelectedMatchIndex() {
     searchManager.selectedMatchIndex -= 1
+    log.Printf("searchManager.selectedMatchIndex decremented to  %v", searchManager.selectedMatchIndex)
+    log.Printf("cursorLineNo  %v and ttyHeight %v", searchManager.cursorLineNo , ttyHeight)
+    if searchManager.cursorLineNo == 2 {
+        searchManager.matchIndexAtTopOfWindow -= 1
+        log.Printf("DECREMENTING matchIndexAtTopOfWindow now at %v", searchManager.matchIndexAtTopOfWindow)
+    } else {
+        searchManager.cursorLineNo -= 1
+    }
 }
 
 func (searchManager *SearchManager) toggleSelectedMatchShouldShowHits() {
@@ -582,27 +629,29 @@ func (searchManager *SearchManager) handleStdinCommands(stdin []byte) {
     } else if stdin[0] == 10 { // C-j
         if searchManager.selectedMatchIndex < len(searchManager.filesWithMatches) - 1 {
             searchManager.incrementSelectedMatchIndex()
-            searchManager.displaySearchMatches()
+            searchManager.renderSearchMatches()
         }
 
     } else if stdin[0] == 11 { // C-k
         if searchManager.selectedMatchIndex > 0 {
             searchManager.decrementSelectedMatchIndex()
-            searchManager.displaySearchMatches()
+            searchManager.renderSearchMatches()
         }
 
     } else if stdin[0] == 0 { // C-space
         searchManager.toggleSelectedMatchShouldShowHits()
-        searchManager.displaySearchMatches()
+        searchManager.renderSearchMatches()
 
     } else {
+        //not chars being added to search term or a recognized command
         return
     }
     searchManager.renderSearchTerm()
+    searchManager.renderScrollBar()
 }
 
 func main() {
+    log.Printf("Starting program.\n\n\n")
     searchManager := NewSearchManager()
     searchManager.listenToStdinAndSearchFiles()
-    //getTtyDimensions()
 }
