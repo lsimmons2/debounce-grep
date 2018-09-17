@@ -120,6 +120,8 @@ var (
     fileShebangs = getFileShebangs()
     dirsToSearch = getDirsToSearch()
     fullPathsToIgnore = getFullPathsToIgnore()
+    shouldTruncateMatchedLines = true
+    maxLinesToPrintPerFile = 5
 )
 
 const (
@@ -203,7 +205,11 @@ func (file *File) renderFilePath() {
     if file.isSelected {
         fmt.Print(MAGENTA_COLOR_CODE)
     }
-    fmt.Print(file.path)
+    var numberOfMatchesInFile int
+    for _, lineWithMatches := range file.linesWithMatches {
+        numberOfMatchesInFile += len(lineWithMatches.matchIndeces)
+    }
+    fmt.Printf("%v - %v matches", file.path, numberOfMatchesInFile)
     if file.isSelected {
         fmt.Print(CANCEL_COLOR_CODE)
     }
@@ -215,9 +221,14 @@ func (file *File) showHits() {
         return file.linesWithMatches[i].lineNo < file.linesWithMatches[j].lineNo
     })
     printNewLine()
+    numberOfLinesPrinted := 0
     for _, lineWithMatches := range file.linesWithMatches {
         lineWithMatches.renderMatchedLine()
-    }
+        numberOfLinesPrinted += 1
+        if numberOfLinesPrinted == maxLinesToPrintPerFile {
+            return
+        }
+    } 
 }
 
 func (file *File) getLinesWithMatches(searchTerm string) []LineWithMatches {
@@ -265,7 +276,7 @@ func (lineWithMatches *LineWithMatches) popNextMatchIndeces() (int, int) {
     return nextMatchStartIndex, nextMatchEndIndex
 }
 
-func (lineWithMatches *LineWithMatches) getLineToRenderWithColorCodes() string {
+func (lineWithMatches *LineWithMatches) getWordsWithColorCodes() []string {
     //insert color code and escape code around each match in line
     var lineToRender string
     nextMatchStartIndex, nextMatchEndIndex := lineWithMatches.popNextMatchIndeces()
@@ -284,7 +295,26 @@ func (lineWithMatches *LineWithMatches) getLineToRenderWithColorCodes() string {
             }
         }
     }
-    return lineToRender
+    //print line word by word to ensure that line
+    //wrapping doesn't happen in middle of word
+    words := strings.Split(lineToRender, SPACE)
+    if shouldTruncateMatchedLines {
+        var firstMatchedWordIndex int
+        for wordIndex, word := range words {
+            if strings.Contains(word, CANCEL_COLOR_CODE) {
+                firstMatchedWordIndex = wordIndex
+                break
+            }
+        }
+        var firstWordToShowIndex int
+        if firstMatchedWordIndex < 4 {
+            firstWordToShowIndex = 0
+        } else {
+            firstWordToShowIndex = firstMatchedWordIndex - 3
+        }
+        return words[firstWordToShowIndex:]
+    }
+    return words
 }
 
 func (lineWithMatches *LineWithMatches) printLineWordByWord(words []string) {
@@ -292,6 +322,10 @@ func (lineWithMatches *LineWithMatches) printLineWordByWord(words []string) {
     for _, word := range words {
         lengthOfWord := lineWithMatches.getLengthOfWord(word)
         if lineWithMatches.wordWillHitEndOfTty(lengthOfWord, currentLineLength) {
+
+            if shouldTruncateMatchedLines {
+                return
+            }
             printNewLine()
             lineWithMatches.renderIndent()
             lineWithMatches.renderLineNoBufferSpace()
@@ -307,10 +341,7 @@ func (lineWithMatches *LineWithMatches) printLineWordByWord(words []string) {
 func (lineWithMatches *LineWithMatches) renderMatchedLine() {
     lineWithMatches.renderIndent()
     lineWithMatches.renderLineNo()
-    lineToRender := lineWithMatches.getLineToRenderWithColorCodes()
-    //print line word by word to ensure that line
-    //wrapping doesn't happen in middle of word
-    words := strings.Split(lineToRender, SPACE)
+    words := lineWithMatches.getWordsWithColorCodes()
     lineWithMatches.printLineWordByWord(words)
     printNewLine()
 }
