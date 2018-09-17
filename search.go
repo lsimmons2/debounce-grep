@@ -154,14 +154,14 @@ type File struct {
     path string
     linesWithMatches []LineWithMatches
     isSelected bool
-    shouldShowHits bool
+    shouldShowMatches bool
 }
 
 func NewFile(filePath string, linesWithMatches []LineWithMatches) *File {
     file := &File{}
     file.path = filePath
     file.isSelected = false
-    file.shouldShowHits = false
+    file.shouldShowMatches = false
     return file
 }
 
@@ -195,8 +195,8 @@ func (file *File) fileLinesGenerator() <- chan string {
 
 func (file *File) render() {
     file.renderFilePath()
-    if file.shouldShowHits {
-        file.showHits()
+    if file.shouldShowMatches {
+        file.showMatches()
     }
 }
 
@@ -208,13 +208,28 @@ func (file *File) renderFilePath() {
     for _, lineWithMatches := range file.linesWithMatches {
         numberOfMatchesInFile += len(lineWithMatches.matchIndeces)
     }
-    fmt.Printf("%v - %v matches", file.path, numberOfMatchesInFile)
+
+    matchesString := "matches"
+    if numberOfMatchesInFile == 1 {
+        matchesString = "match"
+    }
+
+    linesString := "lines"
+    if len(file.linesWithMatches) == 1 {
+        linesString = "line"
+    }
+
+    if file.shouldShowMatches {
+        fmt.Printf("%v - %v %v on %v %v", file.path, numberOfMatchesInFile, matchesString, len(file.linesWithMatches), linesString)
+    } else {
+        fmt.Printf("%v - %v %v", file.path, numberOfMatchesInFile, matchesString)
+    }
     if file.isSelected {
         fmt.Print(CANCEL_COLOR_CODE)
     }
 }
 
-func (file *File) showHits() {
+func (file *File) showMatches() {
     //show lines in increasing order
     sort.Slice(file.linesWithMatches, func(i, j int) bool {
         return file.linesWithMatches[i].lineNo < file.linesWithMatches[j].lineNo
@@ -647,8 +662,8 @@ func (searchManager *SearchManager) decrementSelectedMatchIndex() {
     }
 }
 
-func (searchManager *SearchManager) toggleSelectedMatchShouldShowHits() {
-    searchManager.filesWithMatches[searchManager.selectedMatchIndex].shouldShowHits = !searchManager.filesWithMatches[searchManager.selectedMatchIndex].shouldShowHits
+func (searchManager *SearchManager) toggleSelectedMatchShouldShowMatches() {
+    searchManager.filesWithMatches[searchManager.selectedMatchIndex].shouldShowMatches = !searchManager.filesWithMatches[searchManager.selectedMatchIndex].shouldShowMatches
 }
 
 func (searchManager *SearchManager) handleStdinCommands(stdin []byte) {
@@ -693,7 +708,7 @@ func (searchManager *SearchManager) handleStdinCommands(stdin []byte) {
         }
 
     } else if stdin[0] == 0 { // C-space
-        searchManager.toggleSelectedMatchShouldShowHits()
+        searchManager.toggleSelectedMatchShouldShowMatches()
         searchManager.renderSearchMatches()
 
     } else {
