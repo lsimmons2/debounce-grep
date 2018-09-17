@@ -6,120 +6,26 @@ import (
     "time"
     "os"
     "os/exec"
-    "os/user"
     "path/filepath"
     "bufio"
-    "strconv"
     "sort"
     "index/suffixarray"
     "regexp"
-    "github.com/mattn/go-zglob"
     "log"
-    "math"
-    "github.com/maxmclau/gput"
+    ut "debounce_grep/utilities"
 )
 
-func printNewLine() {
-    fmt.Println("")
-}
-
-//this can be done with math.Round in go 1.10
-func round(x float64) int {
-    t := math.Trunc(x)
-    if math.Abs(x-t) >= 0.5 {
-        return int(t + math.Copysign(1, x))
-    }
-    return int(t)
-}
-
-func setUpLogging() int{
-    f, err := os.OpenFile("log.log", os.O_RDWR | os.O_CREATE | os.O_APPEND, 0666)
-    if err != nil {
-        log.Fatalf("error opening file: %v", err)
-    }
-    //defer f.Close()
-    log.SetOutput(f)
-    return 1
-}
-
-func getTtyDimensions() (int, int) {
-    lines := gput.Lines()
-    cols := gput.Cols()
-    log.Printf("Detected tty dimensions: %v x %v.", lines, cols)
-    return lines, cols
-}
-
-func getDirToSearch() string {
-    dirToSearchEnvVariable := os.Getenv("DEBOUNCE_GREP_DIR_TO_SEARCH")
-    //check if dir exists
-    _, err := os.Stat(dirToSearchEnvVariable)
-    if err == nil {
-        return dirToSearchEnvVariable
-    }
-    usr, _ := user.Current()
-    return usr.HomeDir
-}
-
-func getDebounceTimeMS() int {
-    //default debounce time is 200 ms
-    var debounceTimeMs int
-    debounceTimeMsEnvVariable := os.Getenv("DEBOUNCE_GREP_DEBOUNCE_TIME_MS")
-    if len(debounceTimeMsEnvVariable) == 0 {
-        return 200
-    }
-    debounceTimeMs, err := strconv.Atoi(debounceTimeMsEnvVariable)
-    if err != nil {
-        fmt.Println("DEBOUNCE_GREP_DEBOUNCE_TIME_MS environmental variable was not able to be converted into type int, defaulting to value 200.")
-        return 200
-    }
-    return debounceTimeMs
-}
-
-func getEnvVariableList(envVariableName string) []string {
-    envVariable := os.Getenv(envVariableName)
-    if len(envVariable) == 0 {
-        return nil
-    }
-    return strings.Split(envVariable, ":")
-}
-
-func getFileShebangs() []string {
-    return getEnvVariableList("DEBOUNCE_GREP_FILE_SHEBANG")
-}
-
-func getFullPathsToIgnore() []string {
-    toIgnorePatterns := getEnvVariableList("DEBOUNCE_GREP_FILES_DIRS_TO_IGNORE")
-    var toIgnorePaths []string
-    for _, dirToSearch := range dirsToSearch {
-        for _, toIgnorePattern := range toIgnorePatterns {
-            toIgnoreMatches, _ := zglob.Glob(dirToSearch + "/" + toIgnorePattern)
-            toIgnorePaths = append(toIgnorePaths, toIgnoreMatches...)
-        }
-    }
-    return toIgnorePaths
-}
-
-func getDirsToSearch() []string {
-    var dirsToSearchFromEnv []string
-    dirsToSearchFromEnv = getEnvVariableList("DEBOUNCE_GREP_FILES_DIRS_TO_SEARCH")
-    if len(dirsToSearchFromEnv) == 0 {
-        cwd, _ := filepath.Abs(filepath.Dir(os.Args[0]))
-        dirsToSearchFromEnv = append(dirsToSearchFromEnv, cwd)
-    }
-    return dirsToSearchFromEnv
-}
 
 var (
     //only declaring this var so that logging is initialized before
     //other variables are declared
-    sah = setUpLogging()
-    ttyHeight, ttyWidth = getTtyDimensions()
-    debounceTimeMs = getDebounceTimeMS()
+    ttyHeight, ttyWidth = ut.GetTtyDimensions()
+    debounceTimeMs = ut.GetDebounceTimeMS()
     //type of shebang or mark that user can specify to only
     //include files that contain shebang
-    fileShebangs = getFileShebangs()
-    dirsToSearch = getDirsToSearch()
-    fullPathsToIgnore = getFullPathsToIgnore()
+    fileShebangs = ut.GetFileShebangs()
+    dirsToSearch = ut.GetDirsToSearch()
+    fullPathsToIgnore = ut.GetFullPathsToIgnore()
     shouldTruncateMatchedLines = true
     maxLinesToPrintPerFile = 5
 )
@@ -235,7 +141,7 @@ func (file *File) showMatches() {
     sort.Slice(file.linesWithMatches, func(i, j int) bool {
         return file.linesWithMatches[i].lineNo < file.linesWithMatches[j].lineNo
     })
-    printNewLine()
+    ut.PrintNewLine()
     numberOfLinesPrinted := 0
     for _, lineWithMatches := range file.linesWithMatches {
         lineWithMatches.renderMatchedLine()
@@ -332,7 +238,7 @@ func (lineWithMatches *LineWithMatches) renderMatchedLine() {
     fmt.Print(lineWithMatches.lineNo)
     fmt.Print(SPACE)
     lineWithMatches.renderMatchedLineText()
-    printNewLine()
+    ut.PrintNewLine()
 }
 
 func (lineWithMatches *LineWithMatches) renderMatchedLineText() {
@@ -591,7 +497,7 @@ func (searchManager *SearchManager) renderSearchMatches(){
             } else {
                 fileWithMatches.isSelected = false
             }
-            printNewLine()
+            ut.PrintNewLine()
             fileWithMatches.render()
         }
     }
@@ -604,7 +510,7 @@ func (searchManager *SearchManager) renderScrollBar(){
         return
     }
     percentageMatchesShown := float64(ttyHeight) / float64(len(searchManager.filesWithMatches))
-    heightOfScrollBar := round(percentageMatchesShown * float64(ttyHeight))
+    heightOfScrollBar := ut.Round(percentageMatchesShown * float64(ttyHeight))
     log.Printf("Calculated scroll bar height to be %v lines (%.2f%% of tty height %v).", heightOfScrollBar, percentageMatchesShown, ttyHeight)
     scrollBarStartLine := int((float64(searchManager.matchIndexAtTopOfWindow) / float64(len(searchManager.filesWithMatches))) * float64(ttyHeight))
     log.Printf("Caclulated scroll bar to start from %v.", scrollBarStartLine)
@@ -722,8 +628,12 @@ func (searchManager *SearchManager) handleStdinCommands(stdin []byte) {
     searchManager.renderScrollBar()
 }
 
+func init() {
+    ut.SetUpLogging()
+}
+
 func main() {
-    log.Printf("Starting program.\n\n\n")
+    log.Printf("STARTING MAIN DEBOUNCE_GREP PROGRAM.\n\n\n")
     searchManager := NewSearchManager()
     searchManager.listenToStdinAndSearchFiles()
 }
