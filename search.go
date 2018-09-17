@@ -19,6 +19,10 @@ import (
     "github.com/maxmclau/gput"
 )
 
+func printNewLine() {
+    fmt.Println("")
+}
+
 //this can be done with math.Round in go 1.10
 func round(x float64) int {
     t := math.Trunc(x)
@@ -210,6 +214,7 @@ func (file *File) showHits() {
     sort.Slice(file.linesWithMatches, func(i, j int) bool {
         return file.linesWithMatches[i].lineNo < file.linesWithMatches[j].lineNo
     })
+    printNewLine()
     for _, lineWithMatches := range file.linesWithMatches {
         lineWithMatches.renderMatchedLine()
     }
@@ -252,37 +257,42 @@ func (lineWithMatches *LineWithMatches) renderLineNo() {
     fmt.Print(SPACE)
 }
 
-func (lineWithMatches *LineWithMatches) renderMatchedLine() {
-    lineWithMatches.renderIndent()
-    lineWithMatches.renderLineNo()
-    var lineToRender string
+func (lineWithMatches *LineWithMatches) popNextMatchIndeces() (int, int) {
+    nextMatchIndexPair := lineWithMatches.matchIndeces[0]
+    nextMatchStartIndex := nextMatchIndexPair[0]
+    nextMatchEndIndex := nextMatchIndexPair[1]
+    lineWithMatches.matchIndeces = append(lineWithMatches.matchIndeces[:0], lineWithMatches.matchIndeces[1:]...)
+    return nextMatchStartIndex, nextMatchEndIndex
+}
+
+func (lineWithMatches *LineWithMatches) getLineToRenderWithColorCodes() string {
     //insert color code and escape code around each match in line
+    var lineToRender string
+    nextMatchStartIndex, nextMatchEndIndex := lineWithMatches.popNextMatchIndeces()
     for charIndex, char := range lineWithMatches.text {
-        nextMatchStartIndex := -1
-        nextMatchEndIndex := -1
-        if len(lineWithMatches.matchIndeces) > 0 {
-            nextMatchIndexPair := lineWithMatches.matchIndeces[0]
-            nextMatchStartIndex = nextMatchIndexPair[0]
-            nextMatchEndIndex = nextMatchIndexPair[1]
-        }
         if charIndex == nextMatchStartIndex {
             lineToRender = lineToRender + string(YELLOW_COLOR_CODE)
         }
         lineToRender = lineToRender + string(char)
         if charIndex == nextMatchEndIndex - 1 {
             lineToRender = lineToRender + string(CANCEL_COLOR_CODE)
-            //pop match index pair
-            lineWithMatches.matchIndeces = append(lineWithMatches.matchIndeces[:0], lineWithMatches.matchIndeces[1:]...)
+            if len(lineWithMatches.matchIndeces) > 0 {
+                nextMatchStartIndex, nextMatchEndIndex = lineWithMatches.popNextMatchIndeces()
+            } else {
+                nextMatchStartIndex = -1
+                nextMatchEndIndex = -1
+            }
         }
     }
-    //print line word by word to ensure that line
-    //wrapping doesn't happen in middle of word
-    words := strings.Split(lineToRender, SPACE)
+    return lineToRender
+}
+
+func (lineWithMatches *LineWithMatches) printLineWordByWord(words []string) {
     var currentLineLength int
     for _, word := range words {
         lengthOfWord := lineWithMatches.getLengthOfWord(word)
         if lineWithMatches.wordWillHitEndOfTty(lengthOfWord, currentLineLength) {
-            fmt.Println("")
+            printNewLine()
             lineWithMatches.renderIndent()
             lineWithMatches.renderLineNoBufferSpace()
             currentLineLength = (lengthOfWord + len(SPACE))
@@ -292,7 +302,17 @@ func (lineWithMatches *LineWithMatches) renderMatchedLine() {
         fmt.Print(word)
         fmt.Print(SPACE)
     }
-    fmt.Println("")
+}
+
+func (lineWithMatches *LineWithMatches) renderMatchedLine() {
+    lineWithMatches.renderIndent()
+    lineWithMatches.renderLineNo()
+    lineToRender := lineWithMatches.getLineToRenderWithColorCodes()
+    //print line word by word to ensure that line
+    //wrapping doesn't happen in middle of word
+    words := strings.Split(lineToRender, SPACE)
+    lineWithMatches.printLineWordByWord(words)
+    printNewLine()
 }
 
 func (lineWithMatches *LineWithMatches) getLengthOfWord(word string) int {
@@ -524,7 +544,7 @@ func (searchManager *SearchManager) renderSearchMatches(){
             } else {
                 fileWithMatches.isSelected = false
             }
-            fmt.Println("")
+            printNewLine()
             fileWithMatches.render()
         }
     }
