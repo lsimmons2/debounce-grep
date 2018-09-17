@@ -126,6 +126,8 @@ var (
 
 const (
     SPACE = " "
+    LINE_BREAK = "\n"
+    ELLIPSIS = "..."
     //ANSI escape codes to control stdout and cursor in terminal
     MAGENTA_COLOR_CODE = "\u001b[35m"
     RED_COLOR_CODE = "\u001b[31m"
@@ -140,13 +142,10 @@ const (
     SEARCH_TERM_TERMINAL_LINE_NO = 1
     //search matches always rendered in space bordered by these lines
     SEARCH_MATCH_SPACE_START_TERMINAL_LINE_NO = 2
-    //SEARCH_MATCH_SPACE_END_TERMINAL_LINE_NO = 34
-    //number of spaces the line numbers of matches are
-    //indented from left border of terminal window
-    SEARCH_MATCH_SPACE_INDENT = 3
-    //number of spaces the text of matches are further
-    //indented from SEARCH_MATCH_SPACE_INDENT
-    SEARCH_MATCH_SPACE_LINE_NO_BUFFER = 3
+    //indent between line numbers of matches and left border of tty
+    SEARCH_MATCH_SPACE_INDENT = "   "
+    //indent between text of matches and where line numbers of matches start
+    LINE_NO_BUFFER = "   "
 )
 
 
@@ -263,11 +262,6 @@ func NewLineWithMatches(lineNo int, matchIndeces [][]int, lineText string) *Line
     return lineWithMatches
 }
 
-func (lineWithMatches *LineWithMatches) renderLineNo() {
-    fmt.Print(lineWithMatches.lineNo)
-    fmt.Print(SPACE)
-}
-
 func (lineWithMatches *LineWithMatches) popNextMatchIndeces() (int, int) {
     nextMatchIndexPair := lineWithMatches.matchIndeces[0]
     nextMatchStartIndex := nextMatchIndexPair[0]
@@ -317,58 +311,64 @@ func (lineWithMatches *LineWithMatches) getWordsWithColorCodes() []string {
     return words
 }
 
-func (lineWithMatches *LineWithMatches) printLineWordByWord(words []string) {
-    var currentLineLength int
-    for _, word := range words {
-        lengthOfWord := lineWithMatches.getLengthOfWord(word)
-        if lineWithMatches.wordWillHitEndOfTty(lengthOfWord, currentLineLength) {
-
-            if shouldTruncateMatchedLines {
-                return
-            }
-            printNewLine()
-            lineWithMatches.renderIndent()
-            lineWithMatches.renderLineNoBufferSpace()
-            currentLineLength = (lengthOfWord + len(SPACE))
-        } else {
-            currentLineLength += (lengthOfWord + len(SPACE))
-        }
-        fmt.Print(word)
-        fmt.Print(SPACE)
-    }
-}
-
 func (lineWithMatches *LineWithMatches) renderMatchedLine() {
-    lineWithMatches.renderIndent()
-    lineWithMatches.renderLineNo()
-    words := lineWithMatches.getWordsWithColorCodes()
-    lineWithMatches.printLineWordByWord(words)
+    fmt.Print(SEARCH_MATCH_SPACE_INDENT)
+    fmt.Print(lineWithMatches.lineNo)
+    fmt.Print(SPACE)
+    lineWithMatches.renderMatchedLineText()
     printNewLine()
 }
 
-func (lineWithMatches *LineWithMatches) getLengthOfWord(word string) int {
-    //don't include color codes in length of word
-    wordWithoutColorCodes := strings.Replace(word, YELLOW_COLOR_CODE, "", 1)
+func (lineWithMatches *LineWithMatches) renderMatchedLineText() {
+    words := lineWithMatches.getWordsWithColorCodes()
+    var entitiesToPrint []string
+    for _, word := range words {
+        if lineWithMatches.entityWillHitEndOfTty(word, entitiesToPrint) {
+            log.Printf("Entity \"%v\" will hit end of line.", word)
+            if shouldTruncateMatchedLines {
+                //make sure ellipsis doesn't hit end of tty
+                for lineWithMatches.entityWillHitEndOfTty(ELLIPSIS, entitiesToPrint) {
+                    entitiesToPrint = entitiesToPrint[:len(entitiesToPrint)-1]
+                }
+                //make sure last entity before ellipsis isn't space
+                if entitiesToPrint[len(entitiesToPrint)-1] == SPACE {
+                    entitiesToPrint = entitiesToPrint[:len(entitiesToPrint)-1]
+                }
+                entitiesToPrint = append(entitiesToPrint, ELLIPSIS)
+                break
+            } else {
+                entitiesToPrint = append(entitiesToPrint, LINE_BREAK)
+                entitiesToPrint = append(entitiesToPrint, SEARCH_MATCH_SPACE_INDENT)
+                entitiesToPrint = append(entitiesToPrint, LINE_NO_BUFFER)
+            }
+        }
+        log.Printf("Entity \"%v\" will not hit end of line.", word)
+        entitiesToPrint = append(entitiesToPrint, word)
+        entitiesToPrint = append(entitiesToPrint, SPACE)
+    }
+    for _, entity := range entitiesToPrint {
+        fmt.Print(entity)
+    }
+}
+
+func (lineWithMatches *LineWithMatches) entityWillHitEndOfTty(entity string, entitiesToPrint []string) bool {
+    ttyLength := ttyWidth - 1 - len(SEARCH_MATCH_SPACE_INDENT) - len(LINE_NO_BUFFER)
+    lineLength := lineWithMatches.getLengthOfEntity(entity)
+    for _, entity := range entitiesToPrint {
+        lineLength += lineWithMatches.getLengthOfEntity(entity)
+    }
+    return lineLength > ttyLength
+}
+
+func (lineWithMatches *LineWithMatches) getLengthOfEntity(entity string) int {
+    //don't include color codes in length of words
+    wordWithoutColorCodes := strings.Replace(entity, YELLOW_COLOR_CODE, "", 1)
     wordWithoutColorCodes = strings.Replace(wordWithoutColorCodes, CANCEL_COLOR_CODE, "", 1)
-    return len(wordWithoutColorCodes)
+    lengthOfEntity := len(wordWithoutColorCodes)
+    log.Printf("Calculated length of \"%v\" to be %v (w/o color codes).", wordWithoutColorCodes, lengthOfEntity)
+    return lengthOfEntity
 }
 
-func (lineWithMatches *LineWithMatches) wordWillHitEndOfTty(lengthOfWord int, currentLineLength int) bool {
-    ttyLength := ttyWidth - 1 - SEARCH_MATCH_SPACE_INDENT - SEARCH_MATCH_SPACE_LINE_NO_BUFFER
-    return (lengthOfWord + currentLineLength) > ttyLength
-}
-
-func (lineWithMatches *LineWithMatches) renderIndent() {
-    for i := 1; i <= SEARCH_MATCH_SPACE_INDENT; i++ { 
-        fmt.Print(SPACE)
-    }
-}
-
-func (lineWithMatches *LineWithMatches) renderLineNoBufferSpace() {
-    for i := 1; i <= SEARCH_MATCH_SPACE_LINE_NO_BUFFER; i++ { 
-        fmt.Print(SPACE)
-    }
-}
 
 
 
