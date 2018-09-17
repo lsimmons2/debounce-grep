@@ -146,6 +146,7 @@ const (
     SEARCH_MATCH_SPACE_INDENT = "   "
     //indent between text of matches and where line numbers of matches start
     LINE_NO_BUFFER = "   "
+    SCROLL_BAR_WIDTH = 1
 )
 
 
@@ -367,12 +368,12 @@ func (lineWithMatches *LineWithMatches) renderMatchedLineText() {
 }
 
 func (lineWithMatches *LineWithMatches) entityWillHitEndOfTty(entity string, entitiesToPrint []string) bool {
-    ttyLength := ttyWidth - 1 - len(SEARCH_MATCH_SPACE_INDENT) - len(LINE_NO_BUFFER)
+    roomForText := ttyWidth - 1 - len(SEARCH_MATCH_SPACE_INDENT) - len(LINE_NO_BUFFER) - SCROLL_BAR_WIDTH
     lineLength := lineWithMatches.getLengthOfEntity(entity)
     for _, entity := range entitiesToPrint {
         lineLength += lineWithMatches.getLengthOfEntity(entity)
     }
-    return lineLength > ttyLength
+    return lineLength > roomForText
 }
 
 func (lineWithMatches *LineWithMatches) getLengthOfEntity(entity string) int {
@@ -610,7 +611,9 @@ func (searchManager *SearchManager) renderScrollBar(){
     for i := scrollBarStartLine + 1; i <= scrollBarStartLine + heightOfScrollBar; i++ {
         searchManager.navigateToLineAndColumn(i, ttyWidth)
         fmt.Printf(GREEN_BACKGROUND_COLOR_CODE)
-        fmt.Printf(" ")
+        for i := 0; i < SCROLL_BAR_WIDTH; i++ {
+            fmt.Printf(" ")
+        }
         fmt.Printf(CANCEL_COLOR_CODE)
     }
     searchManager.positionCursorAtIndex()
