@@ -12,6 +12,7 @@ import (
     "index/suffixarray"
     "regexp"
     "log"
+    "github.com/mattn/go-zglob"
     ut "debounce_grep/utilities"
 )
 
@@ -25,9 +26,9 @@ var (
     //include files that contain shebang
     fileShebangs = ut.GetFileShebangs()
     dirsToSearch = ut.GetDirsToSearch()
-    fullPathsToIgnore = ut.GetFullPathsToIgnore()
-    shouldTruncateMatchedLines = true
-    maxLinesToPrintPerFile = 5
+    patternsToIgnore = ut.GetToIgnorePatterns()
+    shouldTruncateMatchedLines = ut.GetShouldTruncateMatchedLines()
+    maxLinesToPrintPerFile = ut.GetMaxLinesToPrintPerFile()
 )
 
 const (
@@ -340,25 +341,40 @@ func (searchManager *SearchManager) printSearchingMessage(searchMessageTemplate 
 }
 
 func (searchManager *SearchManager) getFilesToSearch() []File {
-    var skipped []string
+    var toIgnore []string
     var filesToSearch []File
     for _, dirToSearch := range dirsToSearch {
         err := filepath.Walk(dirToSearch, func(path string, info os.FileInfo, _ error) error {
-            shouldSkipFile := false
-            searchManager.printSearchingMessage("Gathering files to search")
-            for _, pathToIgnore := range fullPathsToIgnore {
-                if pathToIgnore == path {
-                    skipped = append(skipped, path)
-                    if info.IsDir() {
-                        return filepath.SkipDir
-                    } else {
-                        shouldSkipFile = true
-                    }
+            indexToRemove := -1
+            for toIgnoreIndex, toIgnorePath := range toIgnore {
+                if toIgnorePath == path {
+                    indexToRemove = toIgnoreIndex
+                    break
                 }
             }
-            file := File{path: path}
-            if file.hasShebang() && !shouldSkipFile {
-                filesToSearch = append(filesToSearch, file)
+            if indexToRemove > -1 {
+                //remove from toIgnore
+                toIgnore = append(toIgnore[:indexToRemove], toIgnore[indexToRemove+1:]...)
+                //skip dirs to ignore
+                if info.IsDir() {
+                    return filepath.SkipDir
+                }
+                //don't do anything with file to ignore
+            } else {
+                //search dir for dirs/files to ignore
+                if info.IsDir() {
+                    for _, patternToIgnore := range patternsToIgnore {
+                        toIgnoreMatches, _ := zglob.Glob(path + "/" + patternToIgnore)
+                        toIgnore = append(toIgnore, toIgnoreMatches...)
+                    }
+                //check file for shebang and add accordingly
+                } else {
+                    file := File{path: path}
+                    if file.hasShebang() {
+                        filesToSearch = append(filesToSearch, file)
+                    }
+                }
+
             }
             return nil
         })
@@ -366,9 +382,11 @@ func (searchManager *SearchManager) getFilesToSearch() []File {
             fmt.Printf("error walking the path %q: %v\n", dirToSearch, err)
         }
     }
+    log.Printf("Files to search: %v", filesToSearch)
     searchManager.printAtSearchTermLine("Ready To Search")
     return filesToSearch
 }
+
 
 func (searchManager *SearchManager) printAtSearchTermLine(toPrint string) {
     searchManager.clearSearchMatchTerminalSpace()
@@ -636,4 +654,5 @@ func main() {
     log.Printf("STARTING MAIN DEBOUNCE_GREP PROGRAM.\n\n\n")
     searchManager := NewSearchManager()
     searchManager.listenToStdinAndSearchFiles()
+
 }

@@ -6,10 +6,8 @@ import (
     "github.com/maxmclau/gput"
     "log"
     "os"
-    "os/user"
     "strconv"
     "strings"
-    "github.com/mattn/go-zglob"
     "path/filepath"
     "io/ioutil"
 )
@@ -51,65 +49,56 @@ func GetTtyDimensions() (int, int) {
     return lines, cols
 }
 
-func GetDirToSearch() string {
-    dirToSearchEnvVariable := os.Getenv("DEBOUNCE_GREP_DIR_TO_SEARCH")
-    //check if dir exists
-    _, err := os.Stat(dirToSearchEnvVariable)
-    if err == nil {
-        return dirToSearchEnvVariable
+func getIntEnvVariable(envVariableName string, defaultValue int) int {
+    envVarValueString := os.Getenv(envVariableName)
+    envVarValueInt, err := strconv.Atoi(envVarValueString)
+    if err != nil {
+        log.Printf("%v environmental variable was not able to be converted into type int, defaulting to value %v.\n", envVariableName, defaultValue)
+        return defaultValue
     }
-    usr, _ := user.Current()
-    return usr.HomeDir
+    return envVarValueInt
+}
+
+func GetMaxLinesToPrintPerFile() int {
+    //default lines to show is 5
+    return getIntEnvVariable("DEBOUNCE_GREP_MAX_LINES_PER_FILE", 5)
 }
 
 func GetDebounceTimeMS() int {
     //default debounce time is 200 ms
-    var debounceTimeMs int
-    debounceTimeMsEnvVariable := os.Getenv("DEBOUNCE_GREP_DEBOUNCE_TIME_MS")
-    if len(debounceTimeMsEnvVariable) == 0 {
-        return 200
-    }
-    debounceTimeMs, err := strconv.Atoi(debounceTimeMsEnvVariable)
-    if err != nil {
-        fmt.Println("DEBOUNCE_GREP_DEBOUNCE_TIME_MS environmental variable was not able to be converted into type int, defaulting to value 200.")
-        return 200
-    }
-    return debounceTimeMs
+    return getIntEnvVariable("DEBOUNCE_GREP_DEBOUNCE_TIME_MS", 200)
 }
 
-func getEnvVariableList(envVariableName string) []string {
+func getEnvVariableList(envVariableName string, defaultValues []string) []string {
     envVariable := os.Getenv(envVariableName)
     if len(envVariable) == 0 {
-        return nil
+        return defaultValues
     }
+    //TODO: should split before returning default value
     return strings.Split(envVariable, ":")
 }
 
 func GetFileShebangs() []string {
-    return getEnvVariableList("DEBOUNCE_GREP_FILE_SHEBANG")
-}
-
-func GetFullPathsToIgnore() []string {
-    dirsToSearch := GetDirsToSearch()
-    toIgnorePatterns := getEnvVariableList("DEBOUNCE_GREP_FILES_DIRS_TO_IGNORE")
-    var toIgnorePaths []string
-    for _, dirToSearch := range dirsToSearch {
-        for _, toIgnorePattern := range toIgnorePatterns {
-            toIgnoreMatches, _ := zglob.Glob(dirToSearch + "/" + toIgnorePattern)
-            toIgnorePaths = append(toIgnorePaths, toIgnoreMatches...)
-        }
-    }
-    return toIgnorePaths
+    return getEnvVariableList("DEBOUNCE_GREP_FILE_SHEBANGS", []string{""})
 }
 
 func GetDirsToSearch() []string {
-    var dirsToSearchFromEnv []string
-    dirsToSearchFromEnv = getEnvVariableList("DEBOUNCE_GREP_FILES_DIRS_TO_SEARCH")
-    if len(dirsToSearchFromEnv) == 0 {
-        cwd, _ := filepath.Abs(filepath.Dir(os.Args[0]))
-        dirsToSearchFromEnv = append(dirsToSearchFromEnv, cwd)
-    }
-    return dirsToSearchFromEnv
+    currentWorkingDir, _ := filepath.Abs(filepath.Dir(os.Args[0]))
+    defaultDirsToSearch := []string{currentWorkingDir}
+    return getEnvVariableList("DEBOUNCE_GREP_FILES_DIRS_TO_SEARCH", defaultDirsToSearch)
+}
+
+func GetToIgnorePatterns() []string {
+    defaultDirsToIgnore := []string{".git", "venv", "node_modules", "bower_components", "*.png", "*.jpg", "*.jpeg", "*.pyc"}
+    return getEnvVariableList("DEBOUNCE_GREP_FILES_DIRS_TO_IGNORE", defaultDirsToIgnore)
+}
+
+func GetShouldTruncateMatchedLines() bool {
+     shouldTruncateMatchedLines := os.Getenv("DEBOUNCE_GREP_TRUNCATE_MATCHED_LINES")
+     if strings.ToLower(shouldTruncateMatchedLines) == "false" {
+         return false
+     }
+     return true
 }
 
 func init(){
