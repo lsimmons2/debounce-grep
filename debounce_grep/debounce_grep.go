@@ -14,6 +14,7 @@ import (
     "log"
     "github.com/mattn/go-zglob"
     ut "debounce_grep/utilities"
+    "debounce_grep/config"
 )
 
 
@@ -21,14 +22,19 @@ var (
     //only declaring this var so that logging is initialized before
     //other variables are declared
     ttyHeight, ttyWidth = ut.GetTtyDimensions()
-    debounceTimeMs = ut.GetDebounceTimeMS()
+
+    Config = config.Values
+    debounceTimeMs = Config["debounceTimeMs"].(int)
+    maxLinesToPrintPerFile = Config["maxLinesToPrintPerFile"].(int)
+
     //type of shebang or mark that user can specify to only
     //include files that contain shebang
-    fileShebangs = ut.GetFileShebangs()
-    dirsToSearch = ut.GetDirsToSearch()
-    patternsToIgnore = ut.GetPatternsToIgnore()
-    shouldTruncateMatchedLines = ut.GetShouldTruncateMatchedLines()
-    maxLinesToPrintPerFile = ut.GetMaxLinesToPrintPerFile()
+    dirsToSearch = Config["dirsToSearch"].([]string)
+    fileShebangs = Config["fileShebangs"].([]string)
+    patternsToIgnore = Config["patternsToIgnore"].([]string)
+
+    shouldPrintWholeLines = Config["shouldPrintWholeLines"].(bool)
+
 )
 
 const (
@@ -215,7 +221,7 @@ func (lineWithMatches *LineWithMatches) getWordsWithColorCodes() []string {
     //print line word by word to ensure that line
     //wrapping doesn't happen in middle of word
     words := strings.Split(lineToRender, SPACE)
-    if shouldTruncateMatchedLines {
+    if !shouldPrintWholeLines {
         var firstMatchedWordIndex int
         for wordIndex, word := range words {
             if strings.Contains(word, CANCEL_COLOR_CODE) {
@@ -248,7 +254,11 @@ func (lineWithMatches *LineWithMatches) renderMatchedLineText() {
     for _, word := range words {
         if lineWithMatches.entityWillHitEndOfTty(word, entitiesToPrint) {
             log.Printf("Entity \"%v\" will hit end of line.", word)
-            if shouldTruncateMatchedLines {
+            if !shouldPrintWholeLines {
+                entitiesToPrint = append(entitiesToPrint, LINE_BREAK)
+                entitiesToPrint = append(entitiesToPrint, SEARCH_MATCH_SPACE_INDENT)
+                entitiesToPrint = append(entitiesToPrint, LINE_NO_BUFFER)
+            } else {
                 //make sure ellipsis doesn't hit end of tty
                 for lineWithMatches.entityWillHitEndOfTty(ELLIPSIS, entitiesToPrint) {
                     entitiesToPrint = entitiesToPrint[:len(entitiesToPrint)-1]
@@ -259,10 +269,6 @@ func (lineWithMatches *LineWithMatches) renderMatchedLineText() {
                 }
                 entitiesToPrint = append(entitiesToPrint, ELLIPSIS)
                 break
-            } else {
-                entitiesToPrint = append(entitiesToPrint, LINE_BREAK)
-                entitiesToPrint = append(entitiesToPrint, SEARCH_MATCH_SPACE_INDENT)
-                entitiesToPrint = append(entitiesToPrint, LINE_NO_BUFFER)
             }
         }
         log.Printf("Entity \"%v\" will not hit end of line.", word)
@@ -384,7 +390,7 @@ func (searchManager *SearchManager) getFilesToSearch() []File {
             fmt.Printf("error walking the path %q: %v\n", dirToSearch, err)
         }
     }
-    log.Printf("Files to search: %v", filesToSearch)
+    log.Printf("Retrieved %v files to search.", len(filesToSearch))
     searchManager.printAtSearchTermLine("Ready To Search")
     return filesToSearch
 }
