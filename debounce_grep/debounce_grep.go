@@ -344,7 +344,9 @@ func (searchManager *SearchManager) getFilesToSearch() []File {
     var toIgnore []string
     var filesToSearch []File
     for _, dirToSearch := range dirsToSearch {
+        searchingMessage := fmt.Sprintf("Finding files to search in %v", dirToSearch)
         err := filepath.Walk(dirToSearch, func(path string, info os.FileInfo, _ error) error {
+            searchManager.printSearchingMessage(searchingMessage)
             indexToRemove := -1
             for toIgnoreIndex, toIgnorePath := range toIgnore {
                 if toIgnorePath == path {
@@ -654,5 +656,4 @@ func main() {
     log.Printf("STARTING MAIN DEBOUNCE_GREP PROGRAM.\n\n\n")
     searchManager := NewSearchManager()
     searchManager.listenToStdinAndSearchFiles()
-
 }
