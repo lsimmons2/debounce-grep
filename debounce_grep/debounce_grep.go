@@ -26,7 +26,7 @@ var (
     //include files that contain shebang
     fileShebangs = ut.GetFileShebangs()
     dirsToSearch = ut.GetDirsToSearch()
-    patternsToIgnore = ut.GetToIgnorePatterns()
+    patternsToIgnore = ut.GetPatternsToIgnore()
     shouldTruncateMatchedLines = ut.GetShouldTruncateMatchedLines()
     maxLinesToPrintPerFile = ut.GetMaxLinesToPrintPerFile()
 )

@@ -12,8 +12,19 @@ import (
     "io/ioutil"
 )
 
+const (
+    //environmental variables for config options
+    DEBOUNCE_GREP_DEBOUNCE_TIME_MS = "DEBOUNCE_GREP_DEBOUNCE_TIME_MS"
+    DEBOUNCE_GREP_DIRS_TO_SEARCH = "DEBOUNCE_GREP_DIRS_TO_SEARCH"
+    DEBOUNCE_GREP_FILE_SHEBANGS = "DEBOUNCE_GREP_FILE_SHEBANGS"
+    DEBOUNCE_GREP_LOG_FILE_PATH = "DEBOUNCE_GREP_LOG_FILE_PATH"
+    DEBOUNCE_GREP_MAX_LINES_PER_FILE = "DEBOUNCE_GREP_MAX_LINES_PER_FILE"
+    DEBOUNCE_GREP_PATTERNS_TO_IGNORE = "DEBOUNCE_GREP_PATTERNS_TO_IGNORE"
+    DEBOUNCE_GREP_SHOULD_TRUNCATE_MATCHED_LINES = "DEBOUNCE_GREP_SHOULD_TRUNCATE_MATCHED_LINES"
+)
+
 func SetUpLogging() int{
-    logFilePath := os.Getenv("DEBOUNCE_GREP_LOG_FILE_PATH")
+    logFilePath := os.Getenv(DEBOUNCE_GREP_LOG_FILE_PATH)
     if len(logFilePath) == 0 {
         log.SetFlags(0)
         log.SetOutput(ioutil.Discard)
@@ -60,41 +71,44 @@ func getIntEnvVariable(envVariableName string, defaultValue int) int {
 }
 
 func GetMaxLinesToPrintPerFile() int {
-    //default lines to show is 5
-    return getIntEnvVariable("DEBOUNCE_GREP_MAX_LINES_PER_FILE", 5)
+    defaultMaxLines := 5
+    return getIntEnvVariable(DEBOUNCE_GREP_MAX_LINES_PER_FILE, defaultMaxLines)
 }
 
 func GetDebounceTimeMS() int {
-    //default debounce time is 200 ms
-    return getIntEnvVariable("DEBOUNCE_GREP_DEBOUNCE_TIME_MS", 200)
+    defaultDebounceTimeMs := 200
+    return getIntEnvVariable(DEBOUNCE_GREP_DEBOUNCE_TIME_MS, defaultDebounceTimeMs)
 }
 
 func getEnvVariableList(envVariableName string, defaultValues []string) []string {
-    envVariable := os.Getenv(envVariableName)
-    if len(envVariable) == 0 {
+    envValue := os.Getenv(envVariableName)
+    if len (envValue) == 0 {
+        log.Printf("Returning default value %v for %v config option.", defaultValues, envVariableName)
         return defaultValues
     }
-    //TODO: should split before returning default value
-    return strings.Split(envVariable, ":")
+    envVariableList := strings.Split(envValue, ":")
+    log.Printf("Returning environmental variable value %v for %v config option.", envVariableList, envVariableName)
+    return envVariableList
 }
 
 func GetFileShebangs() []string {
-    return getEnvVariableList("DEBOUNCE_GREP_FILE_SHEBANGS", []string{""})
+    var nilFileShebangs []string
+    return getEnvVariableList(DEBOUNCE_GREP_FILE_SHEBANGS, nilFileShebangs)
 }
 
 func GetDirsToSearch() []string {
     currentWorkingDir, _ := filepath.Abs(filepath.Dir(os.Args[0]))
     defaultDirsToSearch := []string{currentWorkingDir}
-    return getEnvVariableList("DEBOUNCE_GREP_FILES_DIRS_TO_SEARCH", defaultDirsToSearch)
+    return getEnvVariableList(DEBOUNCE_GREP_DIRS_TO_SEARCH, defaultDirsToSearch)
 }
 
-func GetToIgnorePatterns() []string {
-    defaultDirsToIgnore := []string{".git", "venv", "node_modules", "bower_components", "*.png", "*.jpg", "*.jpeg", "*.pyc"}
-    return getEnvVariableList("DEBOUNCE_GREP_FILES_DIRS_TO_IGNORE", defaultDirsToIgnore)
+func GetPatternsToIgnore() []string {
+    defaultPatternsToIgnore := []string{".git", "venv", "node_modules", "bower_components", "*.png", "*.jpg", "*.jpeg", "*.pyc"}
+    return getEnvVariableList(DEBOUNCE_GREP_PATTERNS_TO_IGNORE, defaultPatternsToIgnore)
 }
 
 func GetShouldTruncateMatchedLines() bool {
-     shouldTruncateMatchedLines := os.Getenv("DEBOUNCE_GREP_TRUNCATE_MATCHED_LINES")
+     shouldTruncateMatchedLines := os.Getenv(DEBOUNCE_GREP_SHOULD_TRUNCATE_MATCHED_LINES)
      if strings.ToLower(shouldTruncateMatchedLines) == "false" {
          return false
      }
