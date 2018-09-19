@@ -192,18 +192,19 @@ func NewLineWithMatches(lineNo int, matchIndeces [][]int, lineText string) *Line
     return lineWithMatches
 }
 
-func (lineWithMatches *LineWithMatches) popNextMatchIndeces() (int, int) {
-    nextMatchIndexPair := lineWithMatches.matchIndeces[0]
-    nextMatchStartIndex := nextMatchIndexPair[0]
-    nextMatchEndIndex := nextMatchIndexPair[1]
-    lineWithMatches.matchIndeces = append(lineWithMatches.matchIndeces[:0], lineWithMatches.matchIndeces[1:]...)
+func (lineWithMatches *LineWithMatches) getMatchIndeces(indexOfIndeces int) (int, int) {
+    //not popping here since I don't want to mutate the state of matchIndeces since
+    //this method is called in more than one call of getWordsWithColorCodes
+    nextMatchIndexPair := lineWithMatches.matchIndeces[indexOfIndeces]
+    nextMatchStartIndex, nextMatchEndIndex := nextMatchIndexPair[0], nextMatchIndexPair[1]
     return nextMatchStartIndex, nextMatchEndIndex
 }
 
 func (lineWithMatches *LineWithMatches) getWordsWithColorCodes() []string {
     //insert color code and escape code around each match in line
     var lineToRender string
-    nextMatchStartIndex, nextMatchEndIndex := lineWithMatches.popNextMatchIndeces()
+    nextMatchIndexPairIndex := 0 //index of a pair of indeces
+    nextMatchStartIndex, nextMatchEndIndex := lineWithMatches.getMatchIndeces(nextMatchIndexPairIndex)
     for charIndex, char := range lineWithMatches.text {
         if charIndex == nextMatchStartIndex {
             lineToRender = lineToRender + string(YELLOW_COLOR_CODE)
@@ -211,8 +212,9 @@ func (lineWithMatches *LineWithMatches) getWordsWithColorCodes() []string {
         lineToRender = lineToRender + string(char)
         if charIndex == nextMatchEndIndex - 1 {
             lineToRender = lineToRender + string(CANCEL_COLOR_CODE)
-            if len(lineWithMatches.matchIndeces) > 0 {
-                nextMatchStartIndex, nextMatchEndIndex = lineWithMatches.popNextMatchIndeces()
+            if nextMatchIndexPairIndex < len(lineWithMatches.matchIndeces) - 1 {
+                nextMatchIndexPairIndex ++
+                nextMatchStartIndex, nextMatchEndIndex = lineWithMatches.getMatchIndeces(nextMatchIndexPairIndex)
             } else {
                 nextMatchStartIndex = -1
                 nextMatchEndIndex = -1
@@ -260,6 +262,7 @@ func (lineWithMatches *LineWithMatches) renderMatchedLineText() {
             entitiesToPrint = wholeLine
             log.Printf("Line \"%v\" will fit in Tty.", wholeLine)
         } else {
+            log.Printf("Line \"%v\" will not fit in Tty, truncating line.", wholeLine)
             entitiesToPrint = lineWithMatches.getTruncatedLine(words)
         }
     } else {
@@ -278,6 +281,7 @@ func (lineWithMatches *LineWithMatches) getTruncatedLine(words []string) []strin
     var firstMatchedWordIndex int
     for wordIndex, word := range words {
         if strings.Contains(word, CANCEL_COLOR_CODE) {
+            log.Printf("First match in line found to be index %v: \"%v\".", wordIndex, word)
             firstMatchedWordIndex = wordIndex
             break
         }
@@ -288,6 +292,7 @@ func (lineWithMatches *LineWithMatches) getTruncatedLine(words []string) []strin
     } else {
         lastWordToShowIndex = len(words) - 1
     }
+    log.Printf("Last word to print will be \"%v\" at index %v.", words[lastWordToShowIndex], lastWordToShowIndex)
     entitiesToPrint = append(entitiesToPrint, ELLIPSIS)
     for i := lastWordToShowIndex; i >= 0; i-- {
         word := words[i]
