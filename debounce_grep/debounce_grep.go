@@ -250,66 +250,74 @@ func (lineWithMatches *LineWithMatches) renderMatchedLineText() {
     var entitiesToPrint []string
     words := lineWithMatches.getWordsWithColorCodes()
     if !shouldPrintWholeLines {
-
         wholeLine := make([]string, 0)
         for _, word := range words {
             wholeLine = append(wholeLine, word)
             wholeLine = append(wholeLine, SPACE)
         }
         wholeLine = wholeLine[:len(wholeLine)-1]
-
         if !lineWithMatches.entityWillHitEndOfTty("", wholeLine) {
-            //CASE 1) line fits in tty
             entitiesToPrint = wholeLine
             log.Printf("Line \"%v\" will fit in Tty.", wholeLine)
         } else {
-            //if line will be truncated, make sure first match
-            //will be in line with at most three words after it
-            var firstMatchedWordIndex int
-            for wordIndex, word := range words {
-                if strings.Contains(word, CANCEL_COLOR_CODE) {
-                    firstMatchedWordIndex = wordIndex
-                    break
-                }
-            }
-            var lastWordToShowIndex int
-            if len(words) - 1 > firstMatchedWordIndex + 3 {
-                lastWordToShowIndex = firstMatchedWordIndex + 3
-            } else {
-                lastWordToShowIndex = len(words) - 1
-            }
-            entitiesToPrint = append(entitiesToPrint, ELLIPSIS)
-            for i := lastWordToShowIndex; i >= 0; i-- {
-                word := words[i]
-                if lineWithMatches.entityWillHitEndOfTty(word, entitiesToPrint) {
-                    break
-                }
-                entitiesToPrint = append(entitiesToPrint, word)
-                entitiesToPrint = append(entitiesToPrint, SPACE)
-            }
-            //remove first space
-            entitiesToPrint = entitiesToPrint[:len(entitiesToPrint)-1]
-            //reverse since we added in reverse order
-            ut.ReverseStrings(entitiesToPrint)
+            entitiesToPrint = lineWithMatches.getTruncatedLine(words)
         }
     } else {
         //if not truncating lines, just add line break
         //and buffer spaces whenever text hits end of tty
-        for _, word := range words {
-            if lineWithMatches.entityWillHitEndOfTty(word, entitiesToPrint) {
-                log.Printf("Entity \"%v\" will hit end of line.", word)
-                entitiesToPrint = lineWithMatches.removeSpacesOnEnds(entitiesToPrint)
-                entitiesToPrint = append(entitiesToPrint, LINE_BREAK)
-                entitiesToPrint = append(entitiesToPrint, SEARCH_MATCH_SPACE_INDENT)
-                entitiesToPrint = append(entitiesToPrint, LINE_NO_BUFFER)
-            }
-            entitiesToPrint = append(entitiesToPrint, word)
-            entitiesToPrint = append(entitiesToPrint, SPACE)
-        }
+        entitiesToPrint = lineWithMatches.insertLineBreaksAndBuffers(words)
     }
     for _, entity := range entitiesToPrint {
         fmt.Print(entity)
     }
+}
+
+func (lineWithMatches *LineWithMatches) getTruncatedLine(words []string) []string {
+    var entitiesToPrint = make([]string, 0)
+    //make sure first match will be in line with at most three words after it
+    var firstMatchedWordIndex int
+    for wordIndex, word := range words {
+        if strings.Contains(word, CANCEL_COLOR_CODE) {
+            firstMatchedWordIndex = wordIndex
+            break
+        }
+    }
+    var lastWordToShowIndex int
+    if len(words) - 1 > firstMatchedWordIndex + 3 {
+        lastWordToShowIndex = firstMatchedWordIndex + 3
+    } else {
+        lastWordToShowIndex = len(words) - 1
+    }
+    entitiesToPrint = append(entitiesToPrint, ELLIPSIS)
+    for i := lastWordToShowIndex; i >= 0; i-- {
+        word := words[i]
+        if lineWithMatches.entityWillHitEndOfTty(word, entitiesToPrint) {
+            break
+        }
+        entitiesToPrint = append(entitiesToPrint, word)
+        entitiesToPrint = append(entitiesToPrint, SPACE)
+    }
+    //remove first space
+    entitiesToPrint = entitiesToPrint[:len(entitiesToPrint)-1]
+    //reverse since we added in reverse order
+    ut.ReverseStrings(entitiesToPrint)
+    return entitiesToPrint
+}
+
+func (lineWithMatches *LineWithMatches) insertLineBreaksAndBuffers(words []string) []string {
+    var entitiesToPrint = make([]string, 0)
+    for _, word := range words {
+        if lineWithMatches.entityWillHitEndOfTty(word, entitiesToPrint) {
+            log.Printf("Entity \"%v\" will hit end of line.", word)
+            entitiesToPrint = lineWithMatches.removeSpacesOnEnds(entitiesToPrint)
+            entitiesToPrint = append(entitiesToPrint, LINE_BREAK)
+            entitiesToPrint = append(entitiesToPrint, SEARCH_MATCH_SPACE_INDENT)
+            entitiesToPrint = append(entitiesToPrint, LINE_NO_BUFFER)
+        }
+        entitiesToPrint = append(entitiesToPrint, word)
+        entitiesToPrint = append(entitiesToPrint, SPACE)
+    }
+    return entitiesToPrint
 }
 
 func (lineWithMatches *LineWithMatches) entityWillHitEndOfTty(entity string, entitiesToPrint []string) bool {
@@ -614,7 +622,7 @@ func (searchManager *SearchManager) renderSearchMatches(){
         //3) SORT BY FILE INDEX AFTER FINDING BOTH OPEN AND CLOSED FILES
         sort.Ints(filesInWindowIndeces)
 
-        //4) THEN PRINT ALL THE FILES IN FILES IN WINDOWINDECES
+        //4) THEN PRINT ALL THE FILES IN WINDOW INDECES
         for _, fileIndex := range filesInWindowIndeces {
             fileWithMatches := searchManager.filesWithMatches[fileIndex]
             if fileIndex == searchManager.selectedMatchIndex {
