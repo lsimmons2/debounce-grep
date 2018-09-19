@@ -19,22 +19,15 @@ import (
 
 
 var (
-    //only declaring this var so that logging is initialized before
-    //other variables are declared
     ttyHeight, ttyWidth = ut.GetTtyDimensions()
-
+    //see config package for description of config options
     Config = config.Values
     debounceTimeMs = Config["debounceTimeMs"].(int)
     maxLinesToPrintPerFile = Config["maxLinesToPrintPerFile"].(int)
-
-    //type of shebang or mark that user can specify to only
-    //include files that contain shebang
     dirsToSearch = Config["dirsToSearch"].([]string)
     fileShebangs = Config["fileShebangs"].([]string)
     patternsToIgnore = Config["patternsToIgnore"].([]string)
-
     shouldPrintWholeLines = Config["shouldPrintWholeLines"].(bool)
-
 )
 
 const (
@@ -220,7 +213,7 @@ func (lineWithMatches *LineWithMatches) getWordsWithColorCodes() []string {
     }
     words := strings.Split(lineToRender, SPACE)
     if !shouldPrintWholeLines {
-        //if truncating lines, don't put as many as 3 words
+        //if truncating lines, put as many as 3 words
         //before the first word with a match
         var firstMatchedWordIndex int
         for wordIndex, word := range words {
@@ -277,7 +270,6 @@ func (lineWithMatches *LineWithMatches) renderMatchedLineText() {
                 entitiesToPrint = append(entitiesToPrint, LINE_NO_BUFFER)
             }
         }
-        //log.Printf("ENTITES NOW %v", entitiesToPrint)
         entitiesToPrint = append(entitiesToPrint, word)
         entitiesToPrint = append(entitiesToPrint, SPACE)
     }
