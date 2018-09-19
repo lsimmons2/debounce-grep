@@ -61,19 +61,19 @@ type File struct {
     path string
     linesWithMatches []LineWithMatches
     isSelected bool
-    shouldShowMatches bool
+    isOpen bool
 }
 
 func NewFile(filePath string, linesWithMatches []LineWithMatches) *File {
     file := &File{}
     file.path = filePath
     file.isSelected = false
-    file.shouldShowMatches = false
+    file.isOpen = false
     return file
 }
 
 func (file *File) hasShebang() bool{
-    if fileShebangs == nil {
+    if len(fileShebangs) == 0 {
         return true
     }
     for line := range file.fileLinesGenerator(){
@@ -102,7 +102,7 @@ func (file *File) fileLinesGenerator() <- chan string {
 
 func (file *File) render() {
     file.renderFilePath()
-    if file.shouldShowMatches {
+    if file.isOpen {
         file.showMatches()
     }
 }
@@ -126,7 +126,7 @@ func (file *File) renderFilePath() {
         linesString = "line"
     }
 
-    if file.shouldShowMatches {
+    if file.isOpen {
         fmt.Printf("%v - %v %v on %v %v", file.path, numberOfMatchesInFile, matchesString, len(file.linesWithMatches), linesString)
     } else {
         fmt.Printf("%v - %v %v", file.path, numberOfMatchesInFile, matchesString)
@@ -168,6 +168,13 @@ func (file *File) getLinesWithMatches(searchTerm string) []LineWithMatches {
     return linesWithMatches
 }
 
+func (file *File) getNumberOfLinesRendered() int {
+    //2: one line for file path, one for space under matches
+    if len(file.linesWithMatches) > maxLinesToPrintPerFile {
+        return maxLinesToPrintPerFile + 2
+    }
+    return len(file.linesWithMatches) + 2
+}
 
 
 type LineWithMatches struct {
@@ -322,6 +329,7 @@ type SearchManager struct {
     timeLastPrintedSearchMessage int64
     matchIndexAtTopOfWindow int
     cursorLineNo int
+    openFileIndexQueue []int
 }
 
 func NewSearchManager() *SearchManager {
@@ -333,6 +341,7 @@ func NewSearchManager() *SearchManager {
     searchManager.filesToSearch = searchManager.getFilesToSearch()
     searchManager.searchingMessageLastPrinted = ""
     searchManager.timeLastPrintedSearchMessage = time.Now().UnixNano()
+    searchManager.openFileIndexQueue = make([]int, 0)
     return searchManager
 }
 
@@ -520,15 +529,68 @@ func (searchManager *SearchManager) clearSearchMatchTerminalSpace(){
 }
 
 func (searchManager *SearchManager) renderSearchMatches(){
+
     searchManager.clearSearchMatchTerminalSpace()
     searchManager.navigateToLineAndColumn(1, 1)
+
     if len(searchManager.filesWithMatches) > 0 {
-        for index := searchManager.matchIndexAtTopOfWindow; index <= searchManager.matchIndexAtTopOfWindow + ttyHeight - 2; index++ {
-            if len(searchManager.filesWithMatches) <= index {
+
+        filesInWindowIndeces := make([]int, 0)
+        linesTakenUpByOpenFiles := 0
+        linesToSpareForMatches := ttyHeight - 1
+
+        //1) FIRST LOOP THROUGH OPENED FILES HITTING MOST RECENTLY OPENED FIRST
+        for i := len(searchManager.openFileIndexQueue)-1; i >= 0; i-- {
+            openFileIndex := searchManager.openFileIndexQueue[i]
+            openFile := searchManager.filesWithMatches[openFileIndex]
+            linesForFile := openFile.getNumberOfLinesRendered()
+            //if there's room for file
+            if linesToSpareForMatches - linesForFile >= 0 {
+                filesInWindowIndeces = append(filesInWindowIndeces, openFileIndex)
+                linesToSpareForMatches -= linesForFile
+                linesTakenUpByOpenFiles += linesForFile
+            } else {
+                //if only one file is open, then print it even though its
+                //hitting bottom of tty - user's combo of
+                //maxLinesToPrintPerFile and shouldPrintWholeLines
+                //is unfeasible
+                if len(searchManager.openFileIndexQueue) == 1 {
+                    filesInWindowIndeces = append(filesInWindowIndeces, openFileIndex)
+                    linesToSpareForMatches -= linesForFile
+                    linesTakenUpByOpenFiles += linesForFile
+                } else {
+                    break
+                }
+            }
+        }
+        log.Printf("Open files taking up %v lines of tty space, %v lines left for closed files.", linesTakenUpByOpenFiles, linesToSpareForMatches)
+
+        //2) THEN FIND ALL THE CLOSED FILES YOU CAN SHOW IN ORDER OF FILE INDEX
+        top := searchManager.matchIndexAtTopOfWindow
+        bottom := searchManager.matchIndexAtTopOfWindow + ttyHeight - 1
+        for fileIndex := top; fileIndex <= bottom; fileIndex++ {
+            if len(searchManager.filesWithMatches) <= fileIndex {
+                //have reached end of matched files in the case that
+                //they're aren't enough matches files for scroll bar
+                break
+            } else if linesToSpareForMatches == 0 {
+                log.Printf("0 lines left for closed files.")
                 break
             }
-            fileWithMatches := searchManager.filesWithMatches[index]
-            if index == searchManager.selectedMatchIndex {
+            file := searchManager.filesWithMatches[fileIndex]
+            if !file.isOpen {
+                filesInWindowIndeces = append(filesInWindowIndeces, fileIndex)
+                linesToSpareForMatches --
+            }
+        }
+
+        //3) SORT BY FILE INDEX AFTER FINDING BOTH OPEN AND CLOSED FILES
+        sort.Ints(filesInWindowIndeces)
+
+        //4) THEN PRINT ALL THE FILES IN FILESINWINDOWINDECES
+        for _, fileIndex := range filesInWindowIndeces {
+            fileWithMatches := searchManager.filesWithMatches[fileIndex]
+            if fileIndex == searchManager.selectedMatchIndex {
                 fileWithMatches.isSelected = true
             } else {
                 fileWithMatches.isSelected = false
@@ -545,9 +607,9 @@ func (searchManager *SearchManager) renderScrollBar(){
         log.Printf("100%% of matches shown in tty window, not rendering scroll bar.")
         return
     }
-    percentageMatchesShown := float64(ttyHeight) / float64(len(searchManager.filesWithMatches))
-    heightOfScrollBar := ut.Round(percentageMatchesShown * float64(ttyHeight))
-    log.Printf("Calculated scroll bar height to be %v lines (%.2f%% of tty height %v).", heightOfScrollBar, percentageMatchesShown, ttyHeight)
+    percentMatchesInWindow := float64(ttyHeight) / float64(len(searchManager.filesWithMatches))
+    heightOfScrollBar := ut.Round(percentMatchesInWindow * float64(ttyHeight))
+    log.Printf("Calculated scroll bar height to be %v lines (%.2f%% of tty height %v).", heightOfScrollBar, percentMatchesInWindow, ttyHeight)
     scrollBarStartLine := int((float64(searchManager.matchIndexAtTopOfWindow) / float64(len(searchManager.filesWithMatches))) * float64(ttyHeight))
     log.Printf("Caclulated scroll bar to start from %v.", scrollBarStartLine)
     for i := scrollBarStartLine + 1; i <= scrollBarStartLine + heightOfScrollBar; i++ {
@@ -607,8 +669,21 @@ func (searchManager *SearchManager) decrementSelectedMatchIndex() {
     }
 }
 
-func (searchManager *SearchManager) toggleSelectedMatchShouldShowMatches() {
-    searchManager.filesWithMatches[searchManager.selectedMatchIndex].shouldShowMatches = !searchManager.filesWithMatches[searchManager.selectedMatchIndex].shouldShowMatches
+func (searchManager *SearchManager) toggleIfMatchIsOpen(fileToToggleIndex int) {
+    isNowOpen := !searchManager.filesWithMatches[fileToToggleIndex].isOpen
+    searchManager.filesWithMatches[fileToToggleIndex].isOpen = isNowOpen
+
+    if isNowOpen {
+        //if file is now open, add file index to queue
+        searchManager.openFileIndexQueue = append(searchManager.openFileIndexQueue, fileToToggleIndex)
+    } else {
+        //if file is now closed remove file index from queue
+        for loopIndex, fileIndex := range searchManager.openFileIndexQueue {
+            if fileToToggleIndex == fileIndex {
+                searchManager.openFileIndexQueue = append(searchManager.openFileIndexQueue[:loopIndex], searchManager.openFileIndexQueue[loopIndex+1:]...)
+            }
+        }   
+    }
 }
 
 func (searchManager *SearchManager) handleStdinCommands(stdin []byte) {
@@ -653,7 +728,8 @@ func (searchManager *SearchManager) handleStdinCommands(stdin []byte) {
         }
 
     } else if stdin[0] == 0 { // C-space
-        searchManager.toggleSelectedMatchShouldShowMatches()
+        matchIndexToToggle := searchManager.selectedMatchIndex
+        searchManager.toggleIfMatchIsOpen(matchIndexToToggle)
         searchManager.renderSearchMatches()
 
     } else {
