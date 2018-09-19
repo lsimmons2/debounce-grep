@@ -218,10 +218,10 @@ func (lineWithMatches *LineWithMatches) getWordsWithColorCodes() []string {
             }
         }
     }
-    //print line word by word to ensure that line
-    //wrapping doesn't happen in middle of word
     words := strings.Split(lineToRender, SPACE)
     if !shouldPrintWholeLines {
+        //if truncating lines, don't put as many as 3 words
+        //before the first word with a match
         var firstMatchedWordIndex int
         for wordIndex, word := range words {
             if strings.Contains(word, CANCEL_COLOR_CODE) {
@@ -237,6 +237,7 @@ func (lineWithMatches *LineWithMatches) getWordsWithColorCodes() []string {
         }
         return words[firstWordToShowIndex:]
     }
+    log.Printf("Returning words with color codes: \"%v\"", words)
     return words
 }
 
@@ -248,6 +249,13 @@ func (lineWithMatches *LineWithMatches) renderMatchedLine() {
     ut.PrintNewLine()
 }
 
+func (lineWithMatches *LineWithMatches) removeTrailingSpace(entitiesToPrint []string) []string {
+    if entitiesToPrint[len(entitiesToPrint)-1] == SPACE {
+        entitiesToPrint = entitiesToPrint[:len(entitiesToPrint)-1]
+    }
+    return entitiesToPrint
+}
+
 func (lineWithMatches *LineWithMatches) renderMatchedLineText() {
     words := lineWithMatches.getWordsWithColorCodes()
     var entitiesToPrint []string
@@ -255,23 +263,21 @@ func (lineWithMatches *LineWithMatches) renderMatchedLineText() {
         if lineWithMatches.entityWillHitEndOfTty(word, entitiesToPrint) {
             log.Printf("Entity \"%v\" will hit end of line.", word)
             if !shouldPrintWholeLines {
-                entitiesToPrint = append(entitiesToPrint, LINE_BREAK)
-                entitiesToPrint = append(entitiesToPrint, SEARCH_MATCH_SPACE_INDENT)
-                entitiesToPrint = append(entitiesToPrint, LINE_NO_BUFFER)
-            } else {
                 //make sure ellipsis doesn't hit end of tty
                 for lineWithMatches.entityWillHitEndOfTty(ELLIPSIS, entitiesToPrint) {
                     entitiesToPrint = entitiesToPrint[:len(entitiesToPrint)-1]
                 }
-                //make sure last entity before ellipsis isn't space
-                if entitiesToPrint[len(entitiesToPrint)-1] == SPACE {
-                    entitiesToPrint = entitiesToPrint[:len(entitiesToPrint)-1]
-                }
+                entitiesToPrint = lineWithMatches.removeTrailingSpace(entitiesToPrint)
                 entitiesToPrint = append(entitiesToPrint, ELLIPSIS)
                 break
+            } else {
+                entitiesToPrint = lineWithMatches.removeTrailingSpace(entitiesToPrint)
+                entitiesToPrint = append(entitiesToPrint, LINE_BREAK)
+                entitiesToPrint = append(entitiesToPrint, SEARCH_MATCH_SPACE_INDENT)
+                entitiesToPrint = append(entitiesToPrint, LINE_NO_BUFFER)
             }
         }
-        log.Printf("Entity \"%v\" will not hit end of line.", word)
+        //log.Printf("ENTITES NOW %v", entitiesToPrint)
         entitiesToPrint = append(entitiesToPrint, word)
         entitiesToPrint = append(entitiesToPrint, SPACE)
     }
@@ -281,9 +287,22 @@ func (lineWithMatches *LineWithMatches) renderMatchedLineText() {
 }
 
 func (lineWithMatches *LineWithMatches) entityWillHitEndOfTty(entity string, entitiesToPrint []string) bool {
+    //entity being a word, a space, or an ellipsis
+    if len(entitiesToPrint) == 0 {
+        return false
+    }
+    //TODO: what is this 1 from? - make it explicit here
     roomForText := ttyWidth - 1 - len(SEARCH_MATCH_SPACE_INDENT) - len(LINE_NO_BUFFER) - SCROLL_BAR_WIDTH
+    //only check words since last LINE_BREAK for lineLength
+    lastLineBreakIndex := -1
+    for i := len(entitiesToPrint)-1; i >= 0; i-- {
+        if entitiesToPrint[i] == LINE_BREAK {
+            lastLineBreakIndex = i
+            break
+        }
+    }
     lineLength := lineWithMatches.getLengthOfEntity(entity)
-    for _, entity := range entitiesToPrint {
+    for _, entity := range entitiesToPrint[lastLineBreakIndex+1:] {
         lineLength += lineWithMatches.getLengthOfEntity(entity)
     }
     return lineLength > roomForText
@@ -294,7 +313,6 @@ func (lineWithMatches *LineWithMatches) getLengthOfEntity(entity string) int {
     wordWithoutColorCodes := strings.Replace(entity, YELLOW_COLOR_CODE, "", 1)
     wordWithoutColorCodes = strings.Replace(wordWithoutColorCodes, CANCEL_COLOR_CODE, "", 1)
     lengthOfEntity := len(wordWithoutColorCodes)
-    log.Printf("Calculated length of \"%v\" to be %v (w/o color codes).", wordWithoutColorCodes, lengthOfEntity)
     return lengthOfEntity
 }
 
