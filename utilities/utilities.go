@@ -57,6 +57,13 @@ func GetCurrentWorkingDir() string{
     return currentWorkingDir
 }
 
+func ReverseStrings(sliceOfStrings []string) {
+    last := len(sliceOfStrings) - 1
+    for i := 0; i < len(sliceOfStrings)/2; i++ {
+        sliceOfStrings[i], sliceOfStrings[last-i] = sliceOfStrings[last-i], sliceOfStrings[i]
+    }
+}
+
 func init(){
     SetUpLogging()
 }

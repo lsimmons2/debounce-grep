@@ -181,6 +181,7 @@ type LineWithMatches struct {
     lineNo int
     matchIndeces [][]int
     text string
+    wordsWithColorCodes []string
 }
 
 func NewLineWithMatches(lineNo int, matchIndeces [][]int, lineText string) *LineWithMatches {
@@ -219,26 +220,12 @@ func (lineWithMatches *LineWithMatches) getWordsWithColorCodes() []string {
         }
     }
     words := strings.Split(lineToRender, SPACE)
-    if !shouldPrintWholeLines {
-        //if truncating lines, put as many as 3 words
-        //before the first word with a match
-        var firstMatchedWordIndex int
-        for wordIndex, word := range words {
-            if strings.Contains(word, CANCEL_COLOR_CODE) {
-                firstMatchedWordIndex = wordIndex
-                break
-            }
-        }
-        var firstWordToShowIndex int
-        if firstMatchedWordIndex < 4 {
-            firstWordToShowIndex = 0
-        } else {
-            firstWordToShowIndex = firstMatchedWordIndex - 3
-        }
-        return words[firstWordToShowIndex:]
-    }
     log.Printf("Returning words with color codes: \"%v\"", words)
     return words
+}
+
+func (lineWithMatches *LineWithMatches) lineWillHitEndOfTty() {
+
 }
 
 func (lineWithMatches *LineWithMatches) renderMatchedLine() {
@@ -249,7 +236,10 @@ func (lineWithMatches *LineWithMatches) renderMatchedLine() {
     ut.PrintNewLine()
 }
 
-func (lineWithMatches *LineWithMatches) removeTrailingSpace(entitiesToPrint []string) []string {
+func (lineWithMatches *LineWithMatches) removeSpacesOnEnds(entitiesToPrint []string) []string {
+    if entitiesToPrint[0] == SPACE {
+        entitiesToPrint = entitiesToPrint[1:]
+    }
     if entitiesToPrint[len(entitiesToPrint)-1] == SPACE {
         entitiesToPrint = entitiesToPrint[:len(entitiesToPrint)-1]
     }
@@ -257,28 +247,65 @@ func (lineWithMatches *LineWithMatches) removeTrailingSpace(entitiesToPrint []st
 }
 
 func (lineWithMatches *LineWithMatches) renderMatchedLineText() {
-    words := lineWithMatches.getWordsWithColorCodes()
     var entitiesToPrint []string
-    for _, word := range words {
-        if lineWithMatches.entityWillHitEndOfTty(word, entitiesToPrint) {
-            log.Printf("Entity \"%v\" will hit end of line.", word)
-            if !shouldPrintWholeLines {
-                //make sure ellipsis doesn't hit end of tty
-                for lineWithMatches.entityWillHitEndOfTty(ELLIPSIS, entitiesToPrint) {
-                    entitiesToPrint = entitiesToPrint[:len(entitiesToPrint)-1]
+    words := lineWithMatches.getWordsWithColorCodes()
+    if !shouldPrintWholeLines {
+
+        wholeLine := make([]string, 0)
+        for _, word := range words {
+            wholeLine = append(wholeLine, word)
+            wholeLine = append(wholeLine, SPACE)
+        }
+        wholeLine = wholeLine[:len(wholeLine)-1]
+
+        if !lineWithMatches.entityWillHitEndOfTty("", wholeLine) {
+            //CASE 1) line fits in tty
+            entitiesToPrint = wholeLine
+            log.Printf("Line \"%v\" will fit in Tty.", wholeLine)
+        } else {
+            //if line will be truncated, make sure first match
+            //will be in line with at most three words after it
+            var firstMatchedWordIndex int
+            for wordIndex, word := range words {
+                if strings.Contains(word, CANCEL_COLOR_CODE) {
+                    firstMatchedWordIndex = wordIndex
+                    break
                 }
-                entitiesToPrint = lineWithMatches.removeTrailingSpace(entitiesToPrint)
-                entitiesToPrint = append(entitiesToPrint, ELLIPSIS)
-                break
+            }
+            var lastWordToShowIndex int
+            if len(words) - 1 > firstMatchedWordIndex + 3 {
+                lastWordToShowIndex = firstMatchedWordIndex + 3
             } else {
-                entitiesToPrint = lineWithMatches.removeTrailingSpace(entitiesToPrint)
+                lastWordToShowIndex = len(words) - 1
+            }
+            entitiesToPrint = append(entitiesToPrint, ELLIPSIS)
+            for i := lastWordToShowIndex; i >= 0; i-- {
+                word := words[i]
+                if lineWithMatches.entityWillHitEndOfTty(word, entitiesToPrint) {
+                    break
+                }
+                entitiesToPrint = append(entitiesToPrint, word)
+                entitiesToPrint = append(entitiesToPrint, SPACE)
+            }
+            //remove first space
+            entitiesToPrint = entitiesToPrint[:len(entitiesToPrint)-1]
+            //reverse since we added in reverse order
+            ut.ReverseStrings(entitiesToPrint)
+        }
+    } else {
+        //if not truncating lines, just add line break
+        //and buffer spaces whenever text hits end of tty
+        for _, word := range words {
+            if lineWithMatches.entityWillHitEndOfTty(word, entitiesToPrint) {
+                log.Printf("Entity \"%v\" will hit end of line.", word)
+                entitiesToPrint = lineWithMatches.removeSpacesOnEnds(entitiesToPrint)
                 entitiesToPrint = append(entitiesToPrint, LINE_BREAK)
                 entitiesToPrint = append(entitiesToPrint, SEARCH_MATCH_SPACE_INDENT)
                 entitiesToPrint = append(entitiesToPrint, LINE_NO_BUFFER)
             }
+            entitiesToPrint = append(entitiesToPrint, word)
+            entitiesToPrint = append(entitiesToPrint, SPACE)
         }
-        entitiesToPrint = append(entitiesToPrint, word)
-        entitiesToPrint = append(entitiesToPrint, SPACE)
     }
     for _, entity := range entitiesToPrint {
         fmt.Print(entity)
@@ -587,7 +614,7 @@ func (searchManager *SearchManager) renderSearchMatches(){
         //3) SORT BY FILE INDEX AFTER FINDING BOTH OPEN AND CLOSED FILES
         sort.Ints(filesInWindowIndeces)
 
-        //4) THEN PRINT ALL THE FILES IN FILESINWINDOWINDECES
+        //4) THEN PRINT ALL THE FILES IN FILES IN WINDOWINDECES
         for _, fileIndex := range filesInWindowIndeces {
             fileWithMatches := searchManager.filesWithMatches[fileIndex]
             if fileIndex == searchManager.selectedMatchIndex {
