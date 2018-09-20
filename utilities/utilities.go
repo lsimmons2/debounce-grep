@@ -15,12 +15,12 @@ const (
     DEBOUNCE_GREP_LOG_FILE_PATH = "DEBOUNCE_GREP_LOG_FILE_PATH"
 )
 
-func SetUpLogging() int{
+func SetUpLogging() {
     logFilePath := os.Getenv(DEBOUNCE_GREP_LOG_FILE_PATH)
     if len(logFilePath) == 0 {
         log.SetFlags(0)
         log.SetOutput(ioutil.Discard)
-        return 1
+        return
     }
     f, err := os.OpenFile(logFilePath, os.O_RDWR | os.O_CREATE | os.O_APPEND, 0666)
     if err != nil {
@@ -28,7 +28,6 @@ func SetUpLogging() int{
     }
     //defer f.Close()
     log.SetOutput(f)
-    return 0
 }
 
 //this can be done with math.Round in go 1.10
@@ -55,13 +54,6 @@ func GetTtyDimensions() (int, int) {
 func GetCurrentWorkingDir() string{
     currentWorkingDir, _ := filepath.Abs(filepath.Dir(os.Args[0]))
     return currentWorkingDir
-}
-
-func ReverseStrings(sliceOfStrings []string) {
-    last := len(sliceOfStrings) - 1
-    for i := 0; i < len(sliceOfStrings)/2; i++ {
-        sliceOfStrings[i], sliceOfStrings[last-i] = sliceOfStrings[last-i], sliceOfStrings[i]
-    }
 }
 
 func init(){
