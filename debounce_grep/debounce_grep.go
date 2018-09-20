@@ -276,7 +276,6 @@ func (lineWithMatches *LineWithMatches) renderMatchedLineText() {
 }
 
 func (lineWithMatches *LineWithMatches) getTruncatedLine(words []string) []string {
-    var entitiesToPrint = make([]string, 0)
     //make sure first match will be in line with at most three words after it
     var firstMatchedWordIndex int
     for wordIndex, word := range words {
@@ -286,26 +285,63 @@ func (lineWithMatches *LineWithMatches) getTruncatedLine(words []string) []strin
             break
         }
     }
-    var lastWordToShowIndex int
-    if len(words) - 1 > firstMatchedWordIndex + 3 {
-        lastWordToShowIndex = firstMatchedWordIndex + 3
-    } else {
-        lastWordToShowIndex = len(words) - 1
-    }
-    log.Printf("Last word to print will be \"%v\" at index %v.", words[lastWordToShowIndex], lastWordToShowIndex)
-    entitiesToPrint = append(entitiesToPrint, ELLIPSIS)
-    for i := lastWordToShowIndex; i >= 0; i-- {
-        word := words[i]
-        if lineWithMatches.entityWillHitEndOfTty(word, entitiesToPrint) {
+    entitiesToPrint := []string{words[firstMatchedWordIndex], ELLIPSIS}
+    leftOfFirstMatchIndex := firstMatchedWordIndex - 1
+    rightOfFirstMatchIndex := firstMatchedWordIndex + 1
+    leftsTurn := true // else its right turn
+    needsSpaceLeft := true
+    needsSpaceRight := true
+    var entityToAdd string
+    keepAddingToLine := true
+    for keepAddingToLine {
+        if leftsTurn {
+            if leftOfFirstMatchIndex < 0 {
+                leftsTurn = false
+                continue
+            }
+            if needsSpaceLeft {
+                entityToAdd = SPACE
+                needsSpaceLeft = false
+            } else {
+                entityToAdd = words[leftOfFirstMatchIndex]
+                needsSpaceLeft = true
+                leftOfFirstMatchIndex --
+            }
+        } else {
+            if rightOfFirstMatchIndex > len(words) - 1 {
+                leftsTurn = true
+                continue
+            }
+            if needsSpaceRight {
+                entityToAdd = SPACE
+                needsSpaceRight = false
+            } else {
+                entityToAdd = words[rightOfFirstMatchIndex]
+                needsSpaceRight = true
+                rightOfFirstMatchIndex ++
+            }
+        }
+
+        if lineWithMatches.entityWillHitEndOfTty(entityToAdd, entitiesToPrint){
+            keepAddingToLine = false
             break
         }
-        entitiesToPrint = append(entitiesToPrint, word)
-        entitiesToPrint = append(entitiesToPrint, SPACE)
+        if leftsTurn {
+            entitiesToPrint = append([]string{entityToAdd}, entitiesToPrint...)
+            leftsTurn = false
+        } else {
+            //add element to the left of the last element which is ELLIPSIS
+            entitiesToPrint = append(entitiesToPrint[:len(entitiesToPrint)-1], entityToAdd)
+            entitiesToPrint = append(entitiesToPrint, ELLIPSIS)
+            leftsTurn = true
+        }
     }
-    //remove first space
-    entitiesToPrint = entitiesToPrint[:len(entitiesToPrint)-1]
-    //reverse since we added in reverse order
-    ut.ReverseStrings(entitiesToPrint)
+    //if there's a space before ellipsis, remove it
+    secondToLastIndex := len(entitiesToPrint)-2
+    if entitiesToPrint[secondToLastIndex] == SPACE {
+        entitiesToPrint = append(entitiesToPrint[:secondToLastIndex], entitiesToPrint[secondToLastIndex+1:]...)
+    }
+    entitiesToPrint = lineWithMatches.removeSpacesOnEnds(entitiesToPrint)
     return entitiesToPrint
 }
 
