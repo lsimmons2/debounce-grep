@@ -69,7 +69,7 @@ var (
         BooleanConfigOption {
             name: "shouldPrintWholeLines",
             defaultValue: false,
-            envVariableName: "SHOULD_PRINT_WHOLE_LINES",
+            envVariableName: "DEBOUNCE_GREP_SHOULD_PRINT_WHOLE_LINES",
             flagSymbol: "whole-lines",
             description: "If should print whole lines of matches as opposed to truncating them at end of tty.",
         },
