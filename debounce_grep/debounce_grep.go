@@ -103,7 +103,7 @@ func (file *File) fileLinesGenerator() <- chan string {
 func (file *File) render() {
     file.renderFilePath()
     if file.isOpen {
-        file.showMatches()
+        file.open()
     }
 }
 
@@ -136,8 +136,8 @@ func (file *File) renderFilePath() {
     }
 }
 
-func (file *File) showMatches() {
-    //show lines in increasing order
+func (file *File) open() {
+    //show matched lines in increasing order
     sort.Slice(file.linesWithMatches, func(i, j int) bool {
         return file.linesWithMatches[i].lineNo < file.linesWithMatches[j].lineNo
     })
@@ -285,7 +285,15 @@ func (lineWithMatches *LineWithMatches) getTruncatedLine(words []string) []strin
             break
         }
     }
-    entitiesToPrint := []string{words[firstMatchedWordIndex], ELLIPSIS}
+    firstMatchedWord := words[firstMatchedWordIndex]
+    //if first matched word hits end of tty truncate it and return it with ellipsis
+    if lineWithMatches.entityWillHitEndOfTty(firstMatchedWord, []string{ELLIPSIS}){
+        roomForText := ttyWidth - 1 - len(SEARCH_MATCH_SPACE_INDENT) - len(LINE_NO_BUFFER) - SCROLL_BAR_WIDTH
+        lengthOfTruncatedEntity := roomForText-len(ELLIPSIS) + len(YELLOW_COLOR_CODE) + len(CANCEL_COLOR_CODE)
+        singleTruncatedEntity := firstMatchedWord[:lengthOfTruncatedEntity]
+        return []string{singleTruncatedEntity, ELLIPSIS}
+    }
+    entitiesToPrint := []string{firstMatchedWord, ELLIPSIS}
     leftOfFirstMatchIndex := firstMatchedWordIndex - 1
     rightOfFirstMatchIndex := firstMatchedWordIndex + 1
     leftsTurn := true // else its right turn
@@ -323,6 +331,7 @@ func (lineWithMatches *LineWithMatches) getTruncatedLine(words []string) []strin
         }
 
         if lineWithMatches.entityWillHitEndOfTty(entityToAdd, entitiesToPrint){
+            log.Printf("Entity \"%v\" will hit end of tty, ending line.", entityToAdd)
             keepAddingToLine = false
             break
         }
@@ -634,8 +643,6 @@ func (searchManager *SearchManager) renderSearchMatches(){
                     filesInWindowIndeces = append(filesInWindowIndeces, openFileIndex)
                     linesToSpareForMatches -= linesForFile
                     linesTakenUpByOpenFiles += linesForFile
-                } else {
-                    break
                 }
             }
         }
