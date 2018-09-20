@@ -18,18 +18,6 @@ import (
 )
 
 
-var (
-    ttyHeight, ttyWidth = ut.GetTtyDimensions()
-    //see config package for description of config options
-    Config = config.Values
-    debounceTimeMs = Config["debounceTimeMs"].(int)
-    maxLinesToPrintPerFile = Config["maxLinesToPrintPerFile"].(int)
-    dirsToSearch = Config["dirsToSearch"].([]string)
-    fileShebangs = Config["fileShebangs"].([]string)
-    patternsToIgnore = Config["patternsToIgnore"].([]string)
-    shouldPrintWholeLines = Config["shouldPrintWholeLines"].(bool)
-)
-
 const (
     SPACE = " "
     LINE_BREAK = "\n"
@@ -46,13 +34,27 @@ const (
     NAVIGATE_CURSOR_CODE = "\033[%d;%dH" // passed line and column numbers
     //search term always rendered on this line of terminal
     SEARCH_TERM_TERMINAL_LINE_NO = 1
-    //search matches always rendered in space bordered by these lines
+    //search matches always rendered on this line and below
     SEARCH_MATCH_SPACE_START_TERMINAL_LINE_NO = 2
     //indent between line numbers of matches and left border of tty
     SEARCH_MATCH_SPACE_INDENT = "   "
     //indent between text of matches and where line numbers of matches start
     LINE_NO_BUFFER = "   "
     SCROLL_BAR_WIDTH = 1
+)
+
+var (
+    ttyHeight, ttyWidth = ut.GetTtyDimensions()
+    //space that is available for text of matches to be printed - 1 is for buffer before scroll bar
+    spaceForMatchText := ttyWidth - 1 - len(SEARCH_MATCH_SPACE_INDENT) - len(LINE_NO_BUFFER) - SCROLL_BAR_WIDTH
+    //see config package for description of config options
+    Config = config.Values
+    debounceTimeMs = Config["debounceTimeMs"].(int)
+    maxLinesToPrintPerFile = Config["maxLinesToPrintPerFile"].(int)
+    dirsToSearch = Config["dirsToSearch"].([]string)
+    fileShebangs = Config["fileShebangs"].([]string)
+    patternsToIgnore = Config["patternsToIgnore"].([]string)
+    shouldPrintWholeLines = Config["shouldPrintWholeLines"].(bool)
 )
 
 
@@ -276,7 +278,8 @@ func (lineWithMatches *LineWithMatches) renderMatchedLineText() {
 }
 
 func (lineWithMatches *LineWithMatches) getTruncatedLine(words []string) []string {
-    //make sure first match will be in line with at most three words after it
+    //make sure first match will be in line and is in the middle of the line as possible
+    //- find first matched word and alternate adding words to left and to right of match
     var firstMatchedWordIndex int
     for wordIndex, word := range words {
         if strings.Contains(word, CANCEL_COLOR_CODE) {
@@ -288,8 +291,7 @@ func (lineWithMatches *LineWithMatches) getTruncatedLine(words []string) []strin
     firstMatchedWord := words[firstMatchedWordIndex]
     //if first matched word hits end of tty truncate it and return it with ellipsis
     if lineWithMatches.entityWillHitEndOfTty(firstMatchedWord, []string{ELLIPSIS}){
-        roomForText := ttyWidth - 1 - len(SEARCH_MATCH_SPACE_INDENT) - len(LINE_NO_BUFFER) - SCROLL_BAR_WIDTH
-        lengthOfTruncatedEntity := roomForText-len(ELLIPSIS) + len(YELLOW_COLOR_CODE) + len(CANCEL_COLOR_CODE)
+        lengthOfTruncatedEntity := spaceForMatchText-len(ELLIPSIS) + len(YELLOW_COLOR_CODE) + len(CANCEL_COLOR_CODE)
         singleTruncatedEntity := firstMatchedWord[:lengthOfTruncatedEntity]
         return []string{singleTruncatedEntity, ELLIPSIS}
     }
@@ -375,8 +377,6 @@ func (lineWithMatches *LineWithMatches) entityWillHitEndOfTty(entity string, ent
     if len(entitiesToPrint) == 0 {
         return false
     }
-    //TODO: what is this 1 from? - make it explicit here
-    roomForText := ttyWidth - 1 - len(SEARCH_MATCH_SPACE_INDENT) - len(LINE_NO_BUFFER) - SCROLL_BAR_WIDTH
     //only check words since last LINE_BREAK for lineLength
     lastLineBreakIndex := -1
     for i := len(entitiesToPrint)-1; i >= 0; i-- {
@@ -389,7 +389,7 @@ func (lineWithMatches *LineWithMatches) entityWillHitEndOfTty(entity string, ent
     for _, entity := range entitiesToPrint[lastLineBreakIndex+1:] {
         lineLength += lineWithMatches.getLengthOfEntity(entity)
     }
-    return lineLength > roomForText
+    return lineLength > spaceForMatchText
 }
 
 func (lineWithMatches *LineWithMatches) getLengthOfEntity(entity string) int {
