@@ -21,7 +21,7 @@ As you type, files that contain the search term will appear below the prompt whe
 
 <h3>Demo</h3>
 
-![screencast](screencasts/demo_screenshot.mp4)
+![screencast](demo_screenshot.gif)
  
 
 <h3>Config options</h3>
