@@ -46,7 +46,7 @@ const (
 var (
     ttyHeight, ttyWidth = ut.GetTtyDimensions()
     //space that is available for text of matches to be printed - 1 is for buffer before scroll bar
-    spaceForMatchText := ttyWidth - 1 - len(SEARCH_MATCH_SPACE_INDENT) - len(LINE_NO_BUFFER) - SCROLL_BAR_WIDTH
+    spaceForMatchText = ttyWidth - 1 - len(SEARCH_MATCH_SPACE_INDENT) - len(LINE_NO_BUFFER) - SCROLL_BAR_WIDTH
     //see config package for description of config options
     Config = config.Values
     debounceTimeMs = Config["debounceTimeMs"].(int)
@@ -557,6 +557,9 @@ func (searchManager *SearchManager) listenToStdinAndSearchFiles() {
 }
 
 func (searchManager *SearchManager) searchForMatches(){
+    //clear queue of last opened files
+    //searchManager.openFileIndexQueue = make([]int, 0)
+    searchManager.openFileIndexQueue = nil
     searchManager.filesWithMatches = searchManager.getFilesWithMatches(searchManager.searchTerm)
     log.Printf("%v matches found.", len(searchManager.filesWithMatches))
     if len(searchManager.filesWithMatches) == 0 {
@@ -631,6 +634,7 @@ func (searchManager *SearchManager) renderSearchMatches(){
             linesForFile := openFile.getNumberOfLinesRendered()
             //if there's room for file
             if linesToSpareForMatches - linesForFile >= 0 {
+                log.Printf("Adding open file %v to list of files to be printed.", searchManager.filesWithMatches[openFileIndex].path)
                 filesInWindowIndeces = append(filesInWindowIndeces, openFileIndex)
                 linesToSpareForMatches -= linesForFile
                 linesTakenUpByOpenFiles += linesForFile
@@ -662,6 +666,7 @@ func (searchManager *SearchManager) renderSearchMatches(){
             }
             file := searchManager.filesWithMatches[fileIndex]
             if !file.isOpen {
+                log.Printf("Adding closed file %v to list of files to be printed.", file.path)
                 filesInWindowIndeces = append(filesInWindowIndeces, fileIndex)
                 linesToSpareForMatches --
             }
@@ -671,6 +676,7 @@ func (searchManager *SearchManager) renderSearchMatches(){
         sort.Ints(filesInWindowIndeces)
 
         //4) THEN PRINT ALL THE FILES IN WINDOW INDECES
+        log.Printf("Indeces of files to be printed: %v", filesInWindowIndeces)
         for _, fileIndex := range filesInWindowIndeces {
             fileWithMatches := searchManager.filesWithMatches[fileIndex]
             if fileIndex == searchManager.selectedMatchIndex {
