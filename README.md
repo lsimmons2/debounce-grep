@@ -17,7 +17,7 @@ The UI is terminal-based and is somewhat [React](https://reactjs.org/)-inspired 
 
 `$debounce_grep` (or whatever alias you like - I use `dg`)
 
-As you type, files that contain the search term will appear below the prompt where the search term is being typed. You then navigate them by using `Ctrl-j` (down) and `Ctrl-k` (up) and open and close them with `Ctrl-Space` to see the matches highlighted in the file text. The search term being typed can be traversed with `Ctrl-f` (forward) and `Ctrl-b` (backwards). These keyboard shortcuts are vim/emacs-inspired and are currently hard-coded.
+As you type, files that contain the search term will appear below the prompt where the search term is being typed. You then navigate them by using <kbd>Ctrl</kbd>+<kbd>J</kbd> (down) and <kbd>Ctrl</kbd>+<kbd>K</kbd> (up) and open and close them with <kbd>Ctrl</kbd>+<kbd>Space</kbd> to see the matches highlighted in the file text. The search term being typed can be traversed with <kbd>Ctrl</kbd>+<kbd>F</kbd> (forward) and <kbd>Ctrl</kbd>+<kbd>B</kbd> (backwards). These keyboard controls are vim/emacs-inspired and are currently hard-coded.
 
 <h3>Demo</h3>
 
