@@ -41,7 +41,7 @@ var (
     stringOptions = []StringConfigOption {
         StringConfigOption {
             name: "dirsToSearch",
-            defaultValue: []string{ut.GetCurrentWorkingDir()},
+            defaultValue: ut.GetDirsToSearch(),
             envVariableName: "DEBOUNCE_GREP_DIRS_TO_SEARCH",
             flagSymbol: "dir",
             flag: dirsToSearchFlag,
