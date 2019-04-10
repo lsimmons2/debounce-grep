@@ -53,7 +53,7 @@ func GetTtyDimensions() (int, int) {
 
 func GetDirsToSearch() []string {
     //looks first at cli args passed (not as flags starting with - or --),
-    //if no dirs are passed as cli args this way, then passes the cwd
+    //if no dirs are passed as cli args this way, then returns just the cwd
     cwd := GetCurrentWorkingDir()
     if len(os.Args[1:]) > 0 {
         var dirs []string
@@ -62,7 +62,7 @@ func GetDirsToSearch() []string {
         for _, arg := range os.Args[1:]{
             dir,err = filepath.Abs(arg)
             if err != nil {
-                panic(fmt.Sprintf("Could not resolve directory %s passed as CLI arg doesn't exist", dir))
+                panic(fmt.Sprintf("Could not resolve directory %s passed as CLI arg", dir))
             }
             dirs = append(dirs,dir)
         }
