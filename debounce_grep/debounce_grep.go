@@ -455,7 +455,10 @@ func (searchManager *SearchManager) getFilesToSearch() []File {
     var filesToSearch []File
     for _, dirToSearch := range dirsToSearch {
         searchingMessage := fmt.Sprintf("Finding files to search in %v", dirToSearch)
-        err := filepath.Walk(dirToSearch, func(path string, info os.FileInfo, _ error) error {
+        err := filepath.Walk(dirToSearch, func(path string, info os.FileInfo, e error) error {
+            if e != nil {
+                return e
+            }
             searchManager.printSearchingMessage(searchingMessage)
             indexToRemove := -1
             for toIgnoreIndex, toIgnorePath := range toIgnore {
